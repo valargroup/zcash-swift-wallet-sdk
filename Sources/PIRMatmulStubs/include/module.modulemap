@@ -1,0 +1,4 @@
+module PIRMatmulStubs {
+    header "PIRMatmulStubs.h"
+    export *
+}

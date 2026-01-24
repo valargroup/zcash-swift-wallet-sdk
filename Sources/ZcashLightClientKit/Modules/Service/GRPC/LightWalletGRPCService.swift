@@ -452,6 +452,64 @@ class LightWalletGRPCService: LightWalletService {
     func closeConnections() async {
         _ = channel?.close()
     }
+
+    // MARK: - PIR (Private Information Retrieval) Methods
+
+    func getPirParams(mode: ServiceMode) async throws -> PirParamsResponse {
+        guard mode == .direct else {
+            throw ZcashError.grpcServiceCalledWithTorMode
+        }
+
+        do {
+            return try await compactTxStreamer.getPirParams(GetPirParamsRequest())
+        } catch {
+            let serviceError = error.mapToServiceError()
+            throw ZcashError.servicePirParamsFailed(serviceError)
+        }
+    }
+
+    func ypirQuery(_ query: Data, mode: ServiceMode) async throws -> Data {
+        guard mode == .direct else {
+            throw ZcashError.grpcServiceCalledWithTorMode
+        }
+
+        do {
+            let request = YpirQueryRequest.with { $0.query = query }
+            let response = try await compactTxStreamer.ypirQuery(request)
+            return response.response
+        } catch {
+            let serviceError = error.mapToServiceError()
+            throw ZcashError.servicePirQueryFailed(serviceError)
+        }
+    }
+
+    func inspireQuery(_ query: Data, mode: ServiceMode) async throws -> Data {
+        guard mode == .direct else {
+            throw ZcashError.grpcServiceCalledWithTorMode
+        }
+
+        do {
+            let request = InspireQueryRequest.with { $0.query = query }
+            let response = try await compactTxStreamer.inspireQuery(request)
+            return response.response
+        } catch {
+            let serviceError = error.mapToServiceError()
+            throw ZcashError.servicePirQueryFailed(serviceError)
+        }
+    }
+
+    func getPirStatus(mode: ServiceMode) async throws -> PirStatusResponse {
+        guard mode == .direct else {
+            throw ZcashError.grpcServiceCalledWithTorMode
+        }
+
+        do {
+            return try await compactTxStreamer.getPirStatus(GetPirStatusRequest())
+        } catch {
+            let serviceError = error.mapToServiceError()
+            throw ZcashError.servicePirStatusFailed(serviceError)
+        }
+    }
 }
 
 // MARK: - Extensions

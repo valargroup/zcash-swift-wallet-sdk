@@ -1,0 +1,6 @@
+framework module NullifierPIR {
+  umbrella header "nullifier_client_ffiFFI.h"
+
+  export *
+  module * { export * }
+}

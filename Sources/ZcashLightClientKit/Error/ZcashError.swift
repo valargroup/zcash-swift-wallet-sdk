@@ -67,6 +67,15 @@ public enum ZcashError: Equatable, Error {
     /// LightWalletService.getMempoolStream failed.
     /// ZSRVC0011
     case serviceGetMempoolStreamFailed(_ error: LightWalletServiceError)
+    /// LightWalletService.getPirParams failed.
+    /// ZSRVC0012
+    case servicePirParamsFailed(_ error: LightWalletServiceError)
+    /// LightWalletService PIR query (YPIR or InsPIRe) failed.
+    /// ZSRVC0013
+    case servicePirQueryFailed(_ error: LightWalletServiceError)
+    /// LightWalletService.getPirStatus failed.
+    /// ZSRVC0014
+    case servicePirStatusFailed(_ error: LightWalletServiceError)
     /// Endpoint is not provided
     /// ZTSRV0001
     case torServiceMissingEndpoint
@@ -776,6 +785,9 @@ public enum ZcashError: Equatable, Error {
         case .serviceSubtreeRootsStreamFailed: return "LightWalletService.getSubtreeRoots failed."
         case .serviceGetTaddressTxidsFailed: return "LightWalletService.getTaddressTxids failed."
         case .serviceGetMempoolStreamFailed: return "LightWalletService.getMempoolStream failed."
+        case .servicePirParamsFailed: return "LightWalletService.getPirParams failed."
+        case .servicePirQueryFailed: return "LightWalletService PIR query (YPIR or InsPIRe) failed."
+        case .servicePirStatusFailed: return "LightWalletService.getPirStatus failed."
         case .torServiceMissingEndpoint: return "Endpoint is not provided"
         case .torServiceUnresolvedMode: return "Tor client fails to resolve ServiceMode"
         case .grpcServiceCalledWithTorMode: return "GRPC Service is called with a Tor mode instead of direct one"
@@ -993,6 +1005,9 @@ public enum ZcashError: Equatable, Error {
         case .serviceSubtreeRootsStreamFailed: return .serviceSubtreeRootsStreamFailed
         case .serviceGetTaddressTxidsFailed: return .serviceGetTaddressTxidsFailed
         case .serviceGetMempoolStreamFailed: return .serviceGetMempoolStreamFailed
+        case .servicePirParamsFailed: return .servicePirParamsFailed
+        case .servicePirQueryFailed: return .servicePirQueryFailed
+        case .servicePirStatusFailed: return .servicePirStatusFailed
         case .torServiceMissingEndpoint: return .torServiceMissingEndpoint
         case .torServiceUnresolvedMode: return .torServiceUnresolvedMode
         case .grpcServiceCalledWithTorMode: return .grpcServiceCalledWithTorMode

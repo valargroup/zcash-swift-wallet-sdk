@@ -111,4 +111,22 @@ class MockLightWalletService: LightWalletService {
     func fetchUTXOsByAddress(address: String, dbData: (String, UInt), networkType: NetworkType, accountUUID: AccountUUID, mode: ServiceMode) async throws -> TransparentAddressCheckResult {
         .notFound
     }
+
+    // MARK: - PIR Methods
+
+    func getPirParams(mode: ServiceMode) async throws -> PirParamsResponse {
+        throw ZcashError.serviceGetInfoFailed(.generalError(message: "PIR not implemented in mock"))
+    }
+
+    func ypirQuery(_ query: Data, mode: ServiceMode) async throws -> Data {
+        throw ZcashError.serviceGetInfoFailed(.generalError(message: "PIR not implemented in mock"))
+    }
+
+    func inspireQuery(_ query: Data, mode: ServiceMode) async throws -> Data {
+        throw ZcashError.serviceGetInfoFailed(.generalError(message: "PIR not implemented in mock"))
+    }
+
+    func getPirStatus(mode: ServiceMode) async throws -> PirStatusResponse {
+        throw ZcashError.serviceGetInfoFailed(.generalError(message: "PIR not implemented in mock"))
+    }
 }

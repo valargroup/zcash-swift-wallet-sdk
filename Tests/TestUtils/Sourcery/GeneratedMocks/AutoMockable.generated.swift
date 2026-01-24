@@ -1154,6 +1154,102 @@ class LightWalletServiceMock: LightWalletService {
         }
     }
 
+    // MARK: - getPirParams
+
+    var getPirParamsModeThrowableError: Error?
+    var getPirParamsModeCallsCount = 0
+    var getPirParamsModeCalled: Bool {
+        return getPirParamsModeCallsCount > 0
+    }
+    var getPirParamsModeReceivedMode: ServiceMode?
+    var getPirParamsModeReturnValue: PirParamsResponse!
+    var getPirParamsModeClosure: ((ServiceMode) async throws -> PirParamsResponse)?
+
+    func getPirParams(mode: ServiceMode) async throws -> PirParamsResponse {
+        if let error = getPirParamsModeThrowableError {
+            throw error
+        }
+        getPirParamsModeCallsCount += 1
+        getPirParamsModeReceivedMode = mode
+        if let closure = getPirParamsModeClosure {
+            return try await closure(mode)
+        } else {
+            return getPirParamsModeReturnValue
+        }
+    }
+
+    // MARK: - ypirQuery
+
+    var ypirQueryModeThrowableError: Error?
+    var ypirQueryModeCallsCount = 0
+    var ypirQueryModeCalled: Bool {
+        return ypirQueryModeCallsCount > 0
+    }
+    var ypirQueryModeReceivedArguments: (query: Data, mode: ServiceMode)?
+    var ypirQueryModeReturnValue: Data!
+    var ypirQueryModeClosure: ((Data, ServiceMode) async throws -> Data)?
+
+    func ypirQuery(_ query: Data, mode: ServiceMode) async throws -> Data {
+        if let error = ypirQueryModeThrowableError {
+            throw error
+        }
+        ypirQueryModeCallsCount += 1
+        ypirQueryModeReceivedArguments = (query: query, mode: mode)
+        if let closure = ypirQueryModeClosure {
+            return try await closure(query, mode)
+        } else {
+            return ypirQueryModeReturnValue
+        }
+    }
+
+    // MARK: - inspireQuery
+
+    var inspireQueryModeThrowableError: Error?
+    var inspireQueryModeCallsCount = 0
+    var inspireQueryModeCalled: Bool {
+        return inspireQueryModeCallsCount > 0
+    }
+    var inspireQueryModeReceivedArguments: (query: Data, mode: ServiceMode)?
+    var inspireQueryModeReturnValue: Data!
+    var inspireQueryModeClosure: ((Data, ServiceMode) async throws -> Data)?
+
+    func inspireQuery(_ query: Data, mode: ServiceMode) async throws -> Data {
+        if let error = inspireQueryModeThrowableError {
+            throw error
+        }
+        inspireQueryModeCallsCount += 1
+        inspireQueryModeReceivedArguments = (query: query, mode: mode)
+        if let closure = inspireQueryModeClosure {
+            return try await closure(query, mode)
+        } else {
+            return inspireQueryModeReturnValue
+        }
+    }
+
+    // MARK: - getPirStatus
+
+    var getPirStatusModeThrowableError: Error?
+    var getPirStatusModeCallsCount = 0
+    var getPirStatusModeCalled: Bool {
+        return getPirStatusModeCallsCount > 0
+    }
+    var getPirStatusModeReceivedMode: ServiceMode?
+    var getPirStatusModeReturnValue: PirStatusResponse!
+    var getPirStatusModeClosure: ((ServiceMode) async throws -> PirStatusResponse)?
+
+    func getPirStatus(mode: ServiceMode) async throws -> PirStatusResponse {
+        if let error = getPirStatusModeThrowableError {
+            throw error
+        }
+        getPirStatusModeCallsCount += 1
+        getPirStatusModeReceivedMode = mode
+        if let closure = getPirStatusModeClosure {
+            return try await closure(mode)
+        } else {
+            return getPirStatusModeReturnValue
+        }
+    }
+
 }
 class LightWalletdInfoMock: LightWalletdInfo {
 

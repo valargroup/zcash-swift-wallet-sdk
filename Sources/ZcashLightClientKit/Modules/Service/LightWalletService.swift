@@ -247,4 +247,28 @@ protocol LightWalletService: AnyObject {
         accountUUID: AccountUUID,
         mode: ServiceMode
     ) async throws -> TransparentAddressCheckResult
+
+    // MARK: - PIR (Private Information Retrieval) Methods
+
+    /// Get PIR parameters needed by clients to construct privacy-preserving nullifier queries.
+    /// - Returns: PIR parameters including cutoff height, Cuckoo params, and protocol-specific params.
+    /// - Throws: `LightWalletServiceError` when GRPC call fails.
+    func getPirParams(mode: ServiceMode) async throws -> PirParamsResponse
+
+    /// Execute a YPIR query against the nullifier database.
+    /// - Parameter query: Serialized YPIR query bytes.
+    /// - Returns: Serialized YPIR response bytes.
+    /// - Throws: `LightWalletServiceError` when GRPC call fails.
+    func ypirQuery(_ query: Data, mode: ServiceMode) async throws -> Data
+
+    /// Execute an InsPIRe query against the nullifier database.
+    /// - Parameter query: Serialized InsPIRe query bytes.
+    /// - Returns: Serialized InsPIRe response bytes.
+    /// - Throws: `LightWalletServiceError` when GRPC call fails.
+    func inspireQuery(_ query: Data, mode: ServiceMode) async throws -> Data
+
+    /// Get the current status of the PIR service.
+    /// - Returns: PIR service status including availability and database info.
+    /// - Throws: `LightWalletServiceError` when GRPC call fails.
+    func getPirStatus(mode: ServiceMode) async throws -> PirStatusResponse
 }

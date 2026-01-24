@@ -86,7 +86,16 @@ enum ZcashErrorDefinition {
     /// LightWalletService.getMempoolStream failed.
     // sourcery: code="ZSRVC0011"
     case serviceGetMempoolStreamFailed(_ error: LightWalletServiceError)
-    
+    /// LightWalletService.getPirParams failed.
+    // sourcery: code="ZSRVC0012"
+    case servicePirParamsFailed(_ error: LightWalletServiceError)
+    /// LightWalletService PIR query (YPIR or InsPIRe) failed.
+    // sourcery: code="ZSRVC0013"
+    case servicePirQueryFailed(_ error: LightWalletServiceError)
+    /// LightWalletService.getPirStatus failed.
+    // sourcery: code="ZSRVC0014"
+    case servicePirStatusFailed(_ error: LightWalletServiceError)
+
     // MARK: - Tor
     
     /// Endpoint is not provided

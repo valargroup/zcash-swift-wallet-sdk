@@ -19,12 +19,23 @@ let package = Package(
         .package(url: "https://github.com/Electric-Coin-Company/zcash-light-client-ffi", exact: "0.19.1")
     ],
     targets: [
+        .binaryTarget(
+            name: "NullifierPIR",
+            path: "Frameworks/NullifierPIR.xcframework"
+        ),
+        .target(
+            name: "PIRMatmulStubs",
+            dependencies: [],
+            publicHeadersPath: "include"
+        ),
         .target(
             name: "ZcashLightClientKit",
             dependencies: [
                 .product(name: "SQLite", package: "SQLite.swift"),
                 .product(name: "GRPC", package: "grpc-swift"),
-                .product(name: "libzcashlc", package: "zcash-light-client-ffi")
+                .product(name: "libzcashlc", package: "zcash-light-client-ffi"),
+                "NullifierPIR",
+                "PIRMatmulStubs"
             ],
             exclude: [
                 "Modules/Service/GRPC/ProtoBuf/proto/compact_formats.proto",
