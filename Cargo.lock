@@ -2809,6 +2809,7 @@ dependencies = [
  "fs-mistrust",
  "http",
  "http-body-util",
+ "incrementalmerkletree",
  "librustvoting",
  "log-panics",
  "nonempty",
