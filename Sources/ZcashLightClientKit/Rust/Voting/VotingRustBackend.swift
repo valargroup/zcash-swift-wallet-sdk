@@ -82,6 +82,27 @@ public final class VotingRustBackend: @unchecked Sendable {
     }
 }
 
+// MARK: - Wallet identity
+
+extension VotingRustBackend {
+    /// Set the wallet identifier for all subsequent voting operations.
+    /// Must be called after `open(path:)` and before any round operations.
+    public func setWalletId(_ walletId: String) throws {
+        let dbh = try requireHandle()
+        let walletIdBytes = [UInt8](walletId.utf8)
+        let result = walletIdBytes.withUnsafeBufferPointer { buf in
+            zcashlc_voting_set_wallet_id(
+                dbh,
+                buf.baseAddress,
+                UInt(buf.count)
+            )
+        }
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`set_wallet_id` failed"))
+        }
+    }
+}
+
 // MARK: - Round management
 
 extension VotingRustBackend {
@@ -277,7 +298,8 @@ extension VotingRustBackend {
 extension VotingRustBackend {
     /// Get wallet notes eligible for voting at the snapshot height.
     ///
-    /// `accountUUID` must be exactly 16 bytes identifying the wallet account.
+    /// `accountUUID` (16 bytes) directly identifies the wallet account.
+    /// Falls back to positional `accountIndex` when UUID is empty.
     public func getWalletNotes(
         walletDbPath: String,
         snapshotHeight: UInt64,
@@ -288,15 +310,29 @@ extension VotingRustBackend {
         let pathBytes = [UInt8](walletDbPath.utf8)
 
         let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = pathBytes.withUnsafeBufferPointer { pathBuf in
-            accountUUID.withUnsafeBufferPointer { uuidBuf in
-                zcashlc_voting_get_wallet_notes(
+            if !accountUUID.isEmpty {
+                return accountUUID.withUnsafeBufferPointer { uuidBuf in
+                    zcashlc_voting_get_wallet_notes(
+                        dbh,
+                        pathBuf.baseAddress,
+                        UInt(pathBuf.count),
+                        snapshotHeight,
+                        networkId,
+                        uuidBuf.baseAddress,
+                        UInt(uuidBuf.count),
+                        -1
+                    )
+                }
+            } else {
+                return zcashlc_voting_get_wallet_notes(
                     dbh,
                     pathBuf.baseAddress,
                     UInt(pathBuf.count),
                     snapshotHeight,
                     networkId,
-                    uuidBuf.baseAddress,
-                    UInt(uuidBuf.count)
+                    nil,
+                    0,
+                    -1
                 )
             }
         }
