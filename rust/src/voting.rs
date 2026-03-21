@@ -28,7 +28,7 @@ use zcash_protocol::consensus::{self, MAIN_NETWORK, Network, TEST_NETWORK};
 use zip32::{AccountId, Scope};
 
 use librustvoting as voting;
-use voting::storage::VotingDb;
+use voting::storage::{PendingShareRevealGroup, ShareDelegationReceipt, VotingDb};
 use voting::tree_sync::VoteTreeSync;
 
 use crate::{unwrap_exc_or, unwrap_exc_or_null};
@@ -36,6 +36,10 @@ use crate::{unwrap_exc_or, unwrap_exc_or_null};
 // =============================================================================
 // Helper functions
 // =============================================================================
+
+fn hex_lower_32(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
 
 /// Parse a UTF-8 string from raw pointer + length.
 ///
@@ -424,6 +428,7 @@ pub struct JsonSharePayload {
     pub all_enc_shares: Vec<JsonWireEncryptedShare>,
     pub share_comms: Vec<Vec<u8>>,
     pub primary_blind: Vec<u8>,
+    pub share_nullifier: Vec<u8>,
 }
 
 impl From<voting::SharePayload> for JsonSharePayload {
@@ -448,6 +453,7 @@ impl From<voting::SharePayload> for JsonSharePayload {
                 .collect(),
             share_comms: p.share_comms,
             primary_blind: p.primary_blind,
+            share_nullifier: p.share_nullifier,
         }
     }
 }
@@ -1371,6 +1377,26 @@ pub unsafe extern "C" fn zcashlc_voting_generate_note_witnesses(
         let orchard_ct = tree_state.orchard_tree()
             .map_err(|e| anyhow!("failed to parse orchard tree from TreeState: {}", e))?;
         let frontier_root = orchard_ct.root();
+        // Delegation ZKP #1 public inputs use `nc_root` from the chain round. The prover
+        // derives inclusion witnesses from this lightwalletd `TreeState`; if its root
+        // disagrees with `init_round` params (from the vote API), chain verification fails
+        // with "invalid zero-knowledge proof" with no further detail.
+        let expected_nc: [u8; 32] = params
+            .nc_root
+            .as_slice()
+            .try_into()
+            .map_err(|_| anyhow!("stored nc_root must be exactly 32 bytes"))?;
+        let actual_nc = frontier_root.to_bytes();
+        if actual_nc != expected_nc {
+            return Err(anyhow!(
+                "lightwalletd Orchard note-commitment root at snapshot height {} does not match the voting round's nc_root from the chain. \
+                 actual_from_lwd={} expected_from_round={}. \
+                 Use the same mainnet lightwalletd source the operator used to create the round (see ZASHI_LIGHTWALLETD / default us.zec.stardust.rest), or recreate the round.",
+                params.snapshot_height,
+                hex_lower_32(&actual_nc),
+                hex_lower_32(&expected_nc),
+            ));
+        }
         let frontier = orchard_ct.to_frontier();
         let nonempty_frontier = frontier.take()
             .ok_or_else(|| anyhow!("empty orchard frontier — no orchard activity at snapshot height"))?;
@@ -1812,6 +1838,34 @@ pub unsafe extern "C" fn zcashlc_voting_mark_vote_submitted(
     unwrap_exc_or(res, -1)
 }
 
+/// Mark a proposal's VAN authority bit as spent (proposal_authority tracking).
+///
+/// # Safety
+///
+/// - `db` must be a valid, non-null `VotingDatabaseHandle` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_mark_van_authority_spent(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    bundle_index: u32,
+    proposal_id: u32,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+
+        handle
+            .db
+            .mark_van_authority_spent(&round_id_str, bundle_index, proposal_id)
+            .map_err(|e| anyhow!("mark_van_authority_spent failed: {}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
 // =============================================================================
 // A2. VotingDatabase methods — Recovery state (TX hashes, bundles, share delegations, keystone sigs)
 // =============================================================================
@@ -1892,6 +1946,121 @@ pub unsafe extern "C" fn zcashlc_voting_get_vote_tx_hash(
         let hash = handle.db.get_vote_tx_hash(&round_id_str, bundle_index, proposal_id)
             .map_err(|e| anyhow!("{}", e))?;
         json_to_boxed_slice(&hash)
+    });
+    unwrap_exc_or_null(res)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_store_share_delegation_receipt(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    bundle_index: u32,
+    proposal_id: u32,
+    receipt_json: *const u8,
+    receipt_json_len: usize,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        let rj = unsafe { str_from_ptr(receipt_json, receipt_json_len) }?;
+        let receipt: ShareDelegationReceipt = serde_json::from_str(&rj)
+            .map_err(|e| anyhow!("invalid share delegation receipt JSON: {}", e))?;
+        handle
+            .db
+            .store_share_delegation_receipt(&round_id_str, bundle_index, proposal_id, &receipt)
+            .map_err(|e| anyhow!("{}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_list_share_delegation_receipts(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    bundle_index: u32,
+    proposal_id: u32,
+) -> *mut crate::ffi::BoxedSlice {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        let rows = handle
+            .db
+            .list_share_delegation_receipts(&round_id_str, bundle_index, proposal_id)
+            .map_err(|e| anyhow!("{}", e))?;
+        json_to_boxed_slice(&rows)
+    });
+    unwrap_exc_or_null(res)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_clear_share_delegation_receipts(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    bundle_index: u32,
+    proposal_id: u32,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        handle
+            .db
+            .clear_share_delegation_receipts_for_vote(&round_id_str, bundle_index, proposal_id)
+            .map_err(|e| anyhow!("{}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_mark_share_revealed_for_helper(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    bundle_index: u32,
+    proposal_id: u32,
+    share_index: u32,
+    helper_url: *const u8,
+    helper_url_len: usize,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        let helper = unsafe { str_from_ptr(helper_url, helper_url_len) }?;
+        handle
+            .db
+            .mark_share_revealed_for_helper(
+                &round_id_str,
+                bundle_index,
+                proposal_id,
+                share_index,
+                &helper,
+            )
+            .map_err(|e| anyhow!("{}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_list_pending_share_reveals(
+    db: *mut VotingDatabaseHandle,
+) -> *mut crate::ffi::BoxedSlice {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let rows: Vec<PendingShareRevealGroup> = handle
+            .db
+            .list_pending_share_reveal_groups()
+            .map_err(|e| anyhow!("{}", e))?;
+        json_to_boxed_slice(&rows)
     });
     unwrap_exc_or_null(res)
 }

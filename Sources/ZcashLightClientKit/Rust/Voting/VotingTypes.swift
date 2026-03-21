@@ -229,9 +229,6 @@ public struct VotingDelegationSubmission: Codable, Sendable {
     }
 }
 
-// MARK: - Encrypted Share (JSON)
-
-/// An encrypted vote share.
 // MARK: - Vote Commitment Bundle (JSON)
 
 /// A vote commitment bundle produced by ZKP #2.
@@ -336,6 +333,7 @@ public struct VotingSharePayload: Codable, Sendable {
     public let allEncShares: [VotingWireEncryptedShare]
     public let shareComms: [[UInt8]]
     public let primaryBlind: [UInt8]
+    public let shareNullifier: [UInt8]
 
     enum CodingKeys: String, CodingKey {
         case sharesHash = "shares_hash"
@@ -346,6 +344,7 @@ public struct VotingSharePayload: Codable, Sendable {
         case allEncShares = "all_enc_shares"
         case shareComms = "share_comms"
         case primaryBlind = "primary_blind"
+        case shareNullifier = "share_nullifier"
     }
 }
 
