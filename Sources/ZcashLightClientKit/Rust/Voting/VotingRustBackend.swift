@@ -799,7 +799,7 @@ extension VotingRustBackend {
         return try decodeJSON(from: ptr)
     }
 
-    /// Mark a vote as submitted.
+    /// Mark a vote as submitted (share reveals confirmed).
     public func markVoteSubmitted(roundId: String, bundleIndex: UInt32, proposalId: UInt32) throws {
         let dbh = try requireHandle()
         let roundIdBytes = [UInt8](roundId.utf8)
@@ -810,6 +810,20 @@ extension VotingRustBackend {
 
         guard result == 0 else {
             throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`mark_vote_submitted` failed"))
+        }
+    }
+
+    /// Mark a proposal's VAN authority bit as spent (for proposal_authority tracking).
+    public func markVanAuthoritySpent(roundId: String, bundleIndex: UInt32, proposalId: UInt32) throws {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+
+        let result = roundIdBytes.withUnsafeBufferPointer { buf in
+            zcashlc_voting_mark_van_authority_spent(dbh, buf.baseAddress, UInt(buf.count), bundleIndex, proposalId)
+        }
+
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`mark_van_authority_spent` failed"))
         }
     }
 }
@@ -861,6 +875,97 @@ extension VotingRustBackend {
         guard let ptr else { throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`get_vote_tx_hash` failed")) }
         defer { zcashlc_free_boxed_slice(ptr) }
         return try decodeJSON(from: ptr)
+    }
+
+    /// Persist JSON matching librustvoting `ShareDelegationReceipt` (snake_case keys).
+    public func storeShareDelegationReceipt(
+        roundId: String,
+        bundleIndex: UInt32,
+        proposalId: UInt32,
+        receiptJson: [UInt8]
+    ) throws {
+        let dbh = try requireHandle()
+        let ridBytes = [UInt8](roundId.utf8)
+        let result = ridBytes.withUnsafeBufferPointer { ridBuf in
+            receiptJson.withUnsafeBufferPointer { rjBuf in
+                zcashlc_voting_store_share_delegation_receipt(
+                    dbh,
+                    ridBuf.baseAddress,
+                    UInt(ridBuf.count),
+                    bundleIndex,
+                    proposalId,
+                    rjBuf.baseAddress,
+                    UInt(rjBuf.count)
+                )
+            }
+        }
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`store_share_delegation_receipt` failed"))
+        }
+    }
+
+    /// JSON array of `ShareDelegationReceipt` rows.
+    public func listShareDelegationReceiptsData(roundId: String, bundleIndex: UInt32, proposalId: UInt32) throws -> Data {
+        let dbh = try requireHandle()
+        let ridBytes = [UInt8](roundId.utf8)
+        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = ridBytes.withUnsafeBufferPointer { ridBuf in
+            zcashlc_voting_list_share_delegation_receipts(dbh, ridBuf.baseAddress, UInt(ridBuf.count), bundleIndex, proposalId)
+        }
+        guard let ptr else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`list_share_delegation_receipts` failed"))
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+    }
+
+    public func clearShareDelegationReceipts(roundId: String, bundleIndex: UInt32, proposalId: UInt32) throws {
+        let dbh = try requireHandle()
+        let ridBytes = [UInt8](roundId.utf8)
+        let result = ridBytes.withUnsafeBufferPointer { ridBuf in
+            zcashlc_voting_clear_share_delegation_receipts(dbh, ridBuf.baseAddress, UInt(ridBuf.count), bundleIndex, proposalId)
+        }
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`clear_share_delegation_receipts` failed"))
+        }
+    }
+
+    public func markShareRevealedForHelper(
+        roundId: String,
+        bundleIndex: UInt32,
+        proposalId: UInt32,
+        shareIndex: UInt32,
+        helperURL: String
+    ) throws {
+        let dbh = try requireHandle()
+        let ridBytes = [UInt8](roundId.utf8)
+        let urlBytes = [UInt8](helperURL.utf8)
+        let result = ridBytes.withUnsafeBufferPointer { ridBuf in
+            urlBytes.withUnsafeBufferPointer { urlBuf in
+                zcashlc_voting_mark_share_revealed_for_helper(
+                    dbh,
+                    ridBuf.baseAddress,
+                    UInt(ridBuf.count),
+                    bundleIndex,
+                    proposalId,
+                    shareIndex,
+                    urlBuf.baseAddress,
+                    UInt(urlBuf.count)
+                )
+            }
+        }
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`mark_share_revealed_for_helper` failed"))
+        }
+    }
+
+    /// JSON array of `PendingShareRevealGroup` (snake_case keys).
+    public func listPendingShareRevealsData() throws -> Data {
+        let dbh = try requireHandle()
+        guard let ptr = zcashlc_voting_list_pending_share_reveals(dbh) else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`list_pending_share_reveals` failed"))
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
     }
 
     public func storeCommitmentBundle(roundId: String, bundleIndex: UInt32, proposalId: UInt32, bundleJson: String, vcTreePosition: UInt64) throws {
