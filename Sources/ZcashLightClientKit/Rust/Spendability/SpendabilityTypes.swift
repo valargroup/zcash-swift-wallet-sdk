@@ -31,6 +31,44 @@ public struct SpendabilityResult: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Unspent note
+
+/// An unspent Orchard note with its nullifier, for PIR spend-checking.
+public struct PIRUnspentNote: Codable, Sendable, Equatable {
+    public let id: Int64
+    /// Raw nullifier bytes (32 bytes).
+    public let nf: [UInt8]
+    public let value: UInt64
+
+    public init(id: Int64, nf: [UInt8], value: UInt64) {
+        self.id = id
+        self.nf = nf
+        self.value = value
+    }
+}
+
+// MARK: - Nullifier check result
+
+/// Result of checking nullifiers against the PIR server.
+public struct PIRNullifierCheckResult: Codable, Sendable, Equatable {
+    public let earliestHeight: UInt64
+    public let latestHeight: UInt64
+    /// Parallel to the input nullifiers: true = spent.
+    public let spent: [Bool]
+
+    enum CodingKeys: String, CodingKey {
+        case earliestHeight = "earliest_height"
+        case latestHeight = "latest_height"
+        case spent
+    }
+
+    public init(earliestHeight: UInt64, latestHeight: UInt64, spent: [Bool]) {
+        self.earliestHeight = earliestHeight
+        self.latestHeight = latestHeight
+        self.spent = spent
+    }
+}
+
 // MARK: - Pending spends (PIR-detected but not yet confirmed by scanning)
 
 /// A single note detected as spent by PIR that scanning has not yet confirmed.

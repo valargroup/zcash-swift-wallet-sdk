@@ -3984,4 +3984,58 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
         try await deleteAccountClosure!(accountUUID)
     }
 
+    // MARK: - getUnspentOrchardNotesForPIR
+
+    var getUnspentOrchardNotesForPIRThrowableError: Error?
+    var getUnspentOrchardNotesForPIRCallsCount = 0
+    var getUnspentOrchardNotesForPIRReturnValue: [PIRUnspentNote] = []
+    var getUnspentOrchardNotesForPIRClosure: (() async throws -> [PIRUnspentNote])?
+
+    func getUnspentOrchardNotesForPIR() async throws -> [PIRUnspentNote] {
+        if let error = getUnspentOrchardNotesForPIRThrowableError {
+            throw error
+        }
+        getUnspentOrchardNotesForPIRCallsCount += 1
+        if let closure = getUnspentOrchardNotesForPIRClosure {
+            return try await closure()
+        } else {
+            return getUnspentOrchardNotesForPIRReturnValue
+        }
+    }
+
+    // MARK: - insertPIRSpentNotes
+
+    var insertPIRSpentNotesThrowableError: Error?
+    var insertPIRSpentNotesCallsCount = 0
+    var insertPIRSpentNotesReceivedNoteIds: [Int64]?
+    var insertPIRSpentNotesClosure: (([Int64]) async throws -> Void)?
+
+    func insertPIRSpentNotes(_ noteIds: [Int64]) async throws {
+        if let error = insertPIRSpentNotesThrowableError {
+            throw error
+        }
+        insertPIRSpentNotesCallsCount += 1
+        insertPIRSpentNotesReceivedNoteIds = noteIds
+        try await insertPIRSpentNotesClosure?(noteIds)
+    }
+
+    // MARK: - getPIRPendingSpends
+
+    var getPIRPendingSpendsThrowableError: Error?
+    var getPIRPendingSpendsCallsCount = 0
+    var getPIRPendingSpendsReturnValue: PIRPendingSpends = PIRPendingSpends(notes: [], totalValue: 0)
+    var getPIRPendingSpendsClosure: (() async throws -> PIRPendingSpends)?
+
+    func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        if let error = getPIRPendingSpendsThrowableError {
+            throw error
+        }
+        getPIRPendingSpendsCallsCount += 1
+        if let closure = getPIRPendingSpendsClosure {
+            return try await closure()
+        } else {
+            return getPIRPendingSpendsReturnValue
+        }
+    }
+
 }
