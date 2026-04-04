@@ -960,21 +960,31 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         
         // Modify spendable `accountBalances` if chainTip hasn't been updated yet
         if await !sdkFlags.chainTipUpdated {
+            let pirDone = await sdkFlags.pirCompleted
             accountBalances.forEach { key, _ in
                 if let accountBalance = accountBalances[key] {
-                    accountBalances[key] = AccountBalance(
-                        saplingBalance: PoolBalance(
-                            spendableValue: .zero,
-                            changePendingConfirmation: accountBalance.saplingBalance.changePendingConfirmation,
-                            valuePendingSpendability: accountBalance.saplingBalance.valuePendingSpendability
-                            + accountBalance.saplingBalance.spendableValue
-                        ),
-                        orchardBalance: PoolBalance(
+                    // Sapling is always zeroed when chainTip is stale
+                    let saplingBalance = PoolBalance(
+                        spendableValue: .zero,
+                        changePendingConfirmation: accountBalance.saplingBalance.changePendingConfirmation,
+                        valuePendingSpendability: accountBalance.saplingBalance.valuePendingSpendability
+                        + accountBalance.saplingBalance.spendableValue
+                    )
+                    // Orchard is preserved if PIR has confirmed spendability
+                    let orchardBalance: PoolBalance
+                    if pirDone {
+                        orchardBalance = accountBalance.orchardBalance
+                    } else {
+                        orchardBalance = PoolBalance(
                             spendableValue: .zero,
                             changePendingConfirmation: accountBalance.orchardBalance.changePendingConfirmation,
                             valuePendingSpendability: accountBalance.orchardBalance.valuePendingSpendability
                             + accountBalance.orchardBalance.spendableValue
-                        ),
+                        )
+                    }
+                    accountBalances[key] = AccountBalance(
+                        saplingBalance: saplingBalance,
+                        orchardBalance: orchardBalance,
                         unshielded: .zero,
                         awaitingResolution: accountBalance.unshielded
                     )

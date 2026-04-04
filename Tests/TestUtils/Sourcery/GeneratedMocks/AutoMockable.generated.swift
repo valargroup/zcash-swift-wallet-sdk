@@ -2504,6 +2504,52 @@ class SynchronizerMock: Synchronizer {
         try await deleteAccountClosure!(accountUUID)
     }
 
+    // MARK: - checkWalletSpendability
+
+    var checkWalletSpendabilityThrowableError: Error?
+    var checkWalletSpendabilityCallsCount = 0
+    var checkWalletSpendabilityCalled: Bool {
+        return checkWalletSpendabilityCallsCount > 0
+    }
+    var checkWalletSpendabilityReturnValue: SpendabilityResult!
+    var checkWalletSpendabilityClosure: ((String, SpendabilityProgressHandler?) async throws -> SpendabilityResult)?
+
+    func checkWalletSpendability(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> SpendabilityResult {
+        if let error = checkWalletSpendabilityThrowableError {
+            throw error
+        }
+        checkWalletSpendabilityCallsCount += 1
+        if let closure = checkWalletSpendabilityClosure {
+            return try await closure(pirServerUrl, progress)
+        } else {
+            return checkWalletSpendabilityReturnValue
+        }
+    }
+
+    // MARK: - getPIRPendingSpends
+
+    var getPIRPendingSpendsThrowableError: Error?
+    var getPIRPendingSpendsCallsCount = 0
+    var getPIRPendingSpendsCalled: Bool {
+        return getPIRPendingSpendsCallsCount > 0
+    }
+    var getPIRPendingSpendsReturnValue: PIRPendingSpends!
+    var getPIRPendingSpendsClosure: (() async throws -> PIRPendingSpends)?
+
+    func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        if let error = getPIRPendingSpendsThrowableError {
+            throw error
+        }
+        getPIRPendingSpendsCallsCount += 1
+        if let closure = getPIRPendingSpendsClosure {
+            return try await closure()
+        } else {
+            return getPIRPendingSpendsReturnValue
+        }
+    }
 }
 class TransactionRepositoryMock: TransactionRepository {
 

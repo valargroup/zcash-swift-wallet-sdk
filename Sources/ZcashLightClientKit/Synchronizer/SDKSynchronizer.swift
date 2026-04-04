@@ -1028,7 +1028,7 @@ public class SDKSynchronizer: Synchronizer {
     public func debugDatabase(sql: String) -> String {
         transactionRepository.debugDatabase(sql: sql)
     }
-    
+
     public func getSingleUseTransparentAddress(accountUUID: AccountUUID) async throws -> SingleUseTransparentAddress {
         try await initializer.rustBackend.getSingleUseTransparentAddress(accountUUID: accountUUID)
     }
@@ -1089,6 +1089,31 @@ public class SDKSynchronizer: Synchronizer {
     
     public func deleteAccount(_ accountUUID: AccountUUID) async throws {
         try await initializer.rustBackend.deleteAccount(accountUUID)
+    }
+
+    public func checkWalletSpendability(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> SpendabilityResult {
+        let dbPath = initializer.dataDbURL.path
+        let result = try await Task.detached(priority: .userInitiated) {
+            try SpendabilityBackend().checkWalletSpendability(
+                walletDbPath: dbPath,
+                pirServerUrl: pirServerUrl,
+                progress: progress
+            )
+        }.value
+        await sdkFlags.markPIRCompleted()
+        return result
+    }
+
+    public func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        let dbPath = initializer.dataDbURL.path
+        return try await Task.detached(priority: .userInitiated) {
+            try SpendabilityBackend().getPIRPendingSpends(
+                walletDbPath: dbPath
+            )
+        }.value
     }
 
     // MARK: Server switch
