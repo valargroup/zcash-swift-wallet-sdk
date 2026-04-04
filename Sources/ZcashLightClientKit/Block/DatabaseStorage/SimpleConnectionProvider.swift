@@ -24,6 +24,7 @@ class SimpleConnectionProvider: ConnectionProvider {
         guard let conn = db else {
             do {
                 let conn = try Connection(path, readonly: readonly)
+                conn.busyTimeout = 5
                 self.db = conn
                 return conn
             } catch {
@@ -37,6 +38,7 @@ class SimpleConnectionProvider: ConnectionProvider {
     func debugConnection() throws -> Connection {
         do {
             let conn = try Connection(path, readonly: true)
+            conn.busyTimeout = 5
             try addDebugFunctions(conn: conn)
             return conn
         } catch {

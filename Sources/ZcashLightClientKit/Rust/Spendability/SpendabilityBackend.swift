@@ -19,39 +19,39 @@ public enum SpendabilityBackendError: LocalizedError, Equatable {
 
 // MARK: - SpendabilityBackend
 
-/// Wraps the spendability PIR C FFI. Stateless — no persistent handle needed.
+/// Wraps the PIR network FFI. Stateless — no DB handle, no persistent connection.
 public struct SpendabilityBackend: Sendable {
     public init() {}
 
-    /// Check spendability of all unspent orchard notes in the wallet database.
-    /// Opens the wallet DB read-write, extracts nullifiers, checks each via PIR,
-    /// and records spent notes in `pir_spent_notes`.
+    /// Check nullifiers against the PIR server. No database access.
     ///
     /// - Parameters:
-    ///   - walletDbPath: Path to the wallet SQLite database.
+    ///   - notes: Unspent notes with nullifiers (from phase 1 DB read).
     ///   - pirServerUrl: Base URL of the spend-server.
     ///   - progress: Optional progress callback (0.0..1.0).
-    /// - Returns: A `SpendabilityResult` with spent note IDs and total spent value.
-    public func checkWalletSpendability(
-        walletDbPath: String,
+    /// - Returns: A `PIRNullifierCheckResult` with spent flags and server metadata.
+    public func checkNullifiersPIR(
+        notes: [PIRUnspentNote],
         pirServerUrl: String,
         progress: SpendabilityProgressHandler?
-    ) throws -> SpendabilityResult {
-        let dbPathBytes = [UInt8](walletDbPath.utf8)
+    ) throws -> PIRNullifierCheckResult {
         let urlBytes = [UInt8](pirServerUrl.utf8)
+
+        let nullifiers: [[UInt8]] = notes.map { $0.nf }
+        let nullifiersJSON = try JSONEncoder().encode(nullifiers)
 
         var context = SpendabilityProgressContext(handler: progress)
 
-        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = dbPathBytes.withUnsafeBufferPointer { dbBuf in
-            urlBytes.withUnsafeBufferPointer { urlBuf in
+        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = urlBytes.withUnsafeBufferPointer { urlBuf in
+            nullifiersJSON.withUnsafeBytes { nfBuf in
                 withUnsafeMutablePointer(to: &context) { ctxPtr in
                     let callback: (@convention(c) (Double, UnsafeMutableRawPointer?) -> Void)? =
                         progress != nil ? spendabilityProgressTrampoline : nil
-                    return zcashlc_check_wallet_spendability(
-                        dbBuf.baseAddress,
-                        UInt(dbBuf.count),
+                    return zcashlc_check_nullifiers_pir(
                         urlBuf.baseAddress,
                         UInt(urlBuf.count),
+                        nfBuf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                        UInt(nfBuf.count),
                         callback,
                         UnsafeMutableRawPointer(ctxPtr)
                     )
@@ -60,35 +60,12 @@ public struct SpendabilityBackend: Sendable {
         }
 
         guard let ptr else {
-            throw SpendabilityBackendError.rustError(lastErrorMessage(fallback: "`check_wallet_spendability` failed"))
+            throw SpendabilityBackendError.rustError(lastErrorMessage(fallback: "`checkNullifiersPIR` failed"))
         }
         defer { zcashlc_free_boxed_slice(ptr) }
 
         let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
-        return try JSONDecoder().decode(SpendabilityResult.self, from: data)
-    }
-
-    /// Query PIR-detected spent notes whose spends have not yet been confirmed
-    /// by the block scanner. Opens the wallet DB read-only.
-    public func getPIRPendingSpends(
-        walletDbPath: String
-    ) throws -> PIRPendingSpends {
-        let dbPathBytes = [UInt8](walletDbPath.utf8)
-
-        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = dbPathBytes.withUnsafeBufferPointer { dbBuf in
-            zcashlc_get_pir_pending_spends(
-                dbBuf.baseAddress,
-                UInt(dbBuf.count)
-            )
-        }
-
-        guard let ptr else {
-            throw SpendabilityBackendError.rustError(lastErrorMessage(fallback: "`get_pir_pending_spends` failed"))
-        }
-        defer { zcashlc_free_boxed_slice(ptr) }
-
-        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
-        return try JSONDecoder().decode(PIRPendingSpends.self, from: data)
+        return try JSONDecoder().decode(PIRNullifierCheckResult.self, from: data)
     }
 }
 
