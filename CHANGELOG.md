@@ -6,6 +6,12 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # Unreleased
 
+## Added
+- Nullifier PIR (Private Information Retrieval) integration for Orchard note spendability detection without waiting for shard-tree scanning.
+  - `SpendabilityBackend` / `SpendabilityTypes` — Swift wrappers for the new Rust FFI.
+  - `Synchronizer.checkWalletSpendability` / `getPIRPendingSpends` — public API surface.
+  - `SDKFlags.pirCompleted` lifecycle flag.
+
 # 2.4.8 - 2026-03-25
 
 ## Fixed

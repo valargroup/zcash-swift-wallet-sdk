@@ -28,6 +28,11 @@ actor SDKFlags {
     /// Runtime helper flag used to mark whether chainTip CBP action has been done.
     var chainTipUpdated = false
     var chainTipUpdatedTimestamp: TimeInterval = 0.0
+
+    /// Set after `checkWalletSpendability` succeeds. When true, Orchard
+    /// spendableValue is preserved even before `chainTipUpdated` is set.
+    var pirCompleted = false
+    var pirCompletedTimestamp: TimeInterval = 0.0
     
     init(
         torEnabled: Bool,
@@ -64,12 +69,22 @@ actor SDKFlags {
         chainTipUpdatedTimestamp = Date().timeIntervalSince1970
     }
 
+    /// Use to mark PIR spendability check as completed
+    func markPIRCompleted() {
+        pirCompleted = true
+        pirCompletedTimestamp = Date().timeIntervalSince1970
+    }
+
     /// The client using the SDK called `start()`.
     /// Use this to reset or update any relevant flags if needed.
     func sdkStarted() {
+        let now = Date().timeIntervalSince1970
         // If chain tip has been updated recently and is set to false, re-enable it
-        if !chainTipUpdated && Date().timeIntervalSince1970 - chainTipUpdatedTimestamp < 120 {
+        if !chainTipUpdated && now - chainTipUpdatedTimestamp < 120 {
             chainTipUpdated = true
+        }
+        if !pirCompleted && now - pirCompletedTimestamp < 120 {
+            pirCompleted = true
         }
     }
 
@@ -80,5 +95,6 @@ actor SDKFlags {
         // The chain tip might be old enough to cause issues when attempting to send or shield funds before the next chain tip update call finishes.
         // Therefore, it is reset here.
         chainTipUpdated = false
+        pirCompleted = false
     }
 }

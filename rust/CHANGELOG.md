@@ -6,6 +6,10 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- `zcashlc_check_wallet_spendability` — queries a PIR server for spent Orchard nullifiers and records results in `pir_spent_notes`.
+- `zcashlc_get_pir_pending_spends` — returns PIR-detected spends not yet confirmed by the block scanner.
+
 ## 2.4.6 - 2026-03-12
 
 ### Changed
