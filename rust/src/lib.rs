@@ -94,6 +94,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 mod derivation;
 mod ffi;
+mod spendability;
 mod tor;
 
 #[cfg(target_vendor = "apple")]
@@ -4119,6 +4120,141 @@ fn free_ptr_from_vec_with<T>(ptr: *mut T, len: usize, f: impl Fn(&mut T)) {
         }
         drop(s);
     }
+}
+
+// ---------------------------------------------------------------------------
+// PIR FFI — DB-touching operations that go through wallet_db() so they share
+// the same connection pattern as every other zcashlc_* function.
+// ---------------------------------------------------------------------------
+
+/// Returns unspent Orchard notes with nullifiers for PIR spend-checking.
+///
+/// Returns JSON `[{"id":i64,"nf":"hex","value":u64}, ...]`, or null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_get_unspent_orchard_notes_for_pir(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let notes = db_data
+            .get_unspent_orchard_notes_for_pir()
+            .map_err(|e| anyhow!("failed to query unspent orchard notes for PIR: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct Note {
+            id: i64,
+            nf: Vec<u8>,
+            value: u64,
+        }
+
+        let out: Vec<Note> = notes
+            .into_iter()
+            .map(|n| Note {
+                id: n.id,
+                nf: n.nf.to_vec(),
+                value: n.value,
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&out)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
+/// Inserts PIR-detected spent note IDs into the wallet DB.
+///
+/// `note_ids_json` / `note_ids_json_len` is a JSON array of i64 note IDs.
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `note_ids_json` must be non-null and valid UTF-8 for `note_ids_json_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_insert_pir_spent_notes(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+    note_ids_json: *const u8,
+    note_ids_json_len: usize,
+) -> i32 {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let ids_bytes =
+            unsafe { std::slice::from_raw_parts(note_ids_json, note_ids_json_len) };
+        let note_ids: Vec<i64> = serde_json::from_slice(ids_bytes)
+            .map_err(|e| anyhow!("failed to parse note_ids JSON: {e}"))?;
+
+        for note_id in note_ids {
+            db_data
+                .insert_pir_spent_note(note_id)
+                .map_err(|e| anyhow!("failed to insert PIR spent note {note_id}: {e}"))?;
+        }
+        Ok(0i32)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+/// Returns PIR-detected spent notes not yet confirmed by the block scanner.
+///
+/// Uses `wallet_db()` so it shares the `@DBActor`-serialized connection.
+/// Returns JSON `PIRPendingSpendsResult`, or null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_get_pir_pending_spends_v2(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let pir_result = db_data
+            .get_pir_pending_spends()
+            .map_err(|e| anyhow!("failed to query PIR pending spends: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct PendingNote {
+            note_id: i64,
+            value: u64,
+        }
+        #[derive(serde::Serialize)]
+        struct PendingResult {
+            notes: Vec<PendingNote>,
+            total_value: u64,
+        }
+
+        let result = PendingResult {
+            notes: pir_result
+                .notes
+                .into_iter()
+                .map(|n| PendingNote {
+                    note_id: n.note_id,
+                    value: n.value,
+                })
+                .collect(),
+            total_value: pir_result.total_value,
+        };
+
+        let json = serde_json::to_vec(&result)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
 }
 
 pub(crate) fn parse_optional_height(value: i64) -> anyhow::Result<Option<BlockHeight>> {

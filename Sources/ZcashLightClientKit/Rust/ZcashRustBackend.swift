@@ -960,21 +960,31 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         
         // Modify spendable `accountBalances` if chainTip hasn't been updated yet
         if await !sdkFlags.chainTipUpdated {
+            let pirDone = await sdkFlags.pirCompleted
             accountBalances.forEach { key, _ in
                 if let accountBalance = accountBalances[key] {
-                    accountBalances[key] = AccountBalance(
-                        saplingBalance: PoolBalance(
-                            spendableValue: .zero,
-                            changePendingConfirmation: accountBalance.saplingBalance.changePendingConfirmation,
-                            valuePendingSpendability: accountBalance.saplingBalance.valuePendingSpendability
-                            + accountBalance.saplingBalance.spendableValue
-                        ),
-                        orchardBalance: PoolBalance(
+                    // Sapling is always zeroed when chainTip is stale
+                    let saplingBalance = PoolBalance(
+                        spendableValue: .zero,
+                        changePendingConfirmation: accountBalance.saplingBalance.changePendingConfirmation,
+                        valuePendingSpendability: accountBalance.saplingBalance.valuePendingSpendability
+                        + accountBalance.saplingBalance.spendableValue
+                    )
+                    // Orchard is preserved if PIR has confirmed spendability
+                    let orchardBalance: PoolBalance
+                    if pirDone {
+                        orchardBalance = accountBalance.orchardBalance
+                    } else {
+                        orchardBalance = PoolBalance(
                             spendableValue: .zero,
                             changePendingConfirmation: accountBalance.orchardBalance.changePendingConfirmation,
                             valuePendingSpendability: accountBalance.orchardBalance.valuePendingSpendability
                             + accountBalance.orchardBalance.spendableValue
-                        ),
+                        )
+                    }
+                    accountBalances[key] = AccountBalance(
+                        saplingBalance: saplingBalance,
+                        orchardBalance: orchardBalance,
                         unshielded: .zero,
                         awaitingResolution: accountBalance.unshielded
                     )
@@ -1284,6 +1294,67 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
                 lastErrorMessage(fallback: "`deleteAccount` failed with unknown error")
             )
         }
+    }
+
+    // MARK: - PIR (serialized through @DBActor)
+
+    @DBActor
+    func getUnspentOrchardNotesForPIR() async throws -> [PIRUnspentNote] {
+        let ptr = zcashlc_get_unspent_orchard_notes_for_pir(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`getUnspentOrchardNotesForPIR` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRUnspentNote].self, from: data)
+    }
+
+    @DBActor
+    func insertPIRSpentNotes(_ noteIds: [Int64]) async throws {
+        let json = try JSONEncoder().encode(noteIds)
+
+        let result = json.withUnsafeBytes { buf in
+            zcashlc_insert_pir_spent_notes(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count)
+            )
+        }
+
+        guard result == 0 else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`insertPIRSpentNotes` failed")
+            )
+        }
+    }
+
+    @DBActor
+    func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        let ptr = zcashlc_get_pir_pending_spends_v2(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`getPIRPendingSpends` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode(PIRPendingSpends.self, from: data)
     }
 }
 

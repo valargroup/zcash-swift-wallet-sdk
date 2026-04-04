@@ -526,6 +526,22 @@ public protocol Synchronizer: AnyObject {
     ///
     /// - Throws rustDeleteAccount as a common indicator of the operation failure
     func deleteAccount(_ accountUUID: AccountUUID) async throws -> Void
+
+    /// Check spendability of all unspent orchard notes in the wallet using a PIR server.
+    /// Queries the wallet DB for unspent notes, checks each via PIR, and returns
+    /// which are spent along with total spent value.
+    ///
+    /// - Parameters:
+    ///   - pirServerUrl: Base URL of the spend-server.
+    ///   - progress: Optional progress callback (0.0..1.0).
+    func checkWalletSpendability(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> SpendabilityResult
+
+    /// Return PIR-detected spent notes whose spends have not yet been confirmed
+    /// by the block scanner. Queries the wallet DB read-only.
+    func getPIRPendingSpends() async throws -> PIRPendingSpends
 }
 
 public enum SyncStatus: Equatable {

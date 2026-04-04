@@ -2504,6 +2504,52 @@ class SynchronizerMock: Synchronizer {
         try await deleteAccountClosure!(accountUUID)
     }
 
+    // MARK: - checkWalletSpendability
+
+    var checkWalletSpendabilityThrowableError: Error?
+    var checkWalletSpendabilityCallsCount = 0
+    var checkWalletSpendabilityCalled: Bool {
+        return checkWalletSpendabilityCallsCount > 0
+    }
+    var checkWalletSpendabilityReturnValue: SpendabilityResult!
+    var checkWalletSpendabilityClosure: ((String, SpendabilityProgressHandler?) async throws -> SpendabilityResult)?
+
+    func checkWalletSpendability(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> SpendabilityResult {
+        if let error = checkWalletSpendabilityThrowableError {
+            throw error
+        }
+        checkWalletSpendabilityCallsCount += 1
+        if let closure = checkWalletSpendabilityClosure {
+            return try await closure(pirServerUrl, progress)
+        } else {
+            return checkWalletSpendabilityReturnValue
+        }
+    }
+
+    // MARK: - getPIRPendingSpends
+
+    var getPIRPendingSpendsThrowableError: Error?
+    var getPIRPendingSpendsCallsCount = 0
+    var getPIRPendingSpendsCalled: Bool {
+        return getPIRPendingSpendsCallsCount > 0
+    }
+    var getPIRPendingSpendsReturnValue: PIRPendingSpends!
+    var getPIRPendingSpendsClosure: (() async throws -> PIRPendingSpends)?
+
+    func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        if let error = getPIRPendingSpendsThrowableError {
+            throw error
+        }
+        getPIRPendingSpendsCallsCount += 1
+        if let closure = getPIRPendingSpendsClosure {
+            return try await closure()
+        } else {
+            return getPIRPendingSpendsReturnValue
+        }
+    }
 }
 class TransactionRepositoryMock: TransactionRepository {
 
@@ -3936,6 +3982,60 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
         deleteAccountCallsCount += 1
         deleteAccountReceivedAccountUUID = accountUUID
         try await deleteAccountClosure!(accountUUID)
+    }
+
+    // MARK: - getUnspentOrchardNotesForPIR
+
+    var getUnspentOrchardNotesForPIRThrowableError: Error?
+    var getUnspentOrchardNotesForPIRCallsCount = 0
+    var getUnspentOrchardNotesForPIRReturnValue: [PIRUnspentNote] = []
+    var getUnspentOrchardNotesForPIRClosure: (() async throws -> [PIRUnspentNote])?
+
+    func getUnspentOrchardNotesForPIR() async throws -> [PIRUnspentNote] {
+        if let error = getUnspentOrchardNotesForPIRThrowableError {
+            throw error
+        }
+        getUnspentOrchardNotesForPIRCallsCount += 1
+        if let closure = getUnspentOrchardNotesForPIRClosure {
+            return try await closure()
+        } else {
+            return getUnspentOrchardNotesForPIRReturnValue
+        }
+    }
+
+    // MARK: - insertPIRSpentNotes
+
+    var insertPIRSpentNotesThrowableError: Error?
+    var insertPIRSpentNotesCallsCount = 0
+    var insertPIRSpentNotesReceivedNoteIds: [Int64]?
+    var insertPIRSpentNotesClosure: (([Int64]) async throws -> Void)?
+
+    func insertPIRSpentNotes(_ noteIds: [Int64]) async throws {
+        if let error = insertPIRSpentNotesThrowableError {
+            throw error
+        }
+        insertPIRSpentNotesCallsCount += 1
+        insertPIRSpentNotesReceivedNoteIds = noteIds
+        try await insertPIRSpentNotesClosure?(noteIds)
+    }
+
+    // MARK: - getPIRPendingSpends
+
+    var getPIRPendingSpendsThrowableError: Error?
+    var getPIRPendingSpendsCallsCount = 0
+    var getPIRPendingSpendsReturnValue: PIRPendingSpends = PIRPendingSpends(notes: [], totalValue: 0)
+    var getPIRPendingSpendsClosure: (() async throws -> PIRPendingSpends)?
+
+    func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        if let error = getPIRPendingSpendsThrowableError {
+            throw error
+        }
+        getPIRPendingSpendsCallsCount += 1
+        if let closure = getPIRPendingSpendsClosure {
+            return try await closure()
+        } else {
+            return getPIRPendingSpendsReturnValue
+        }
     }
 
 }
