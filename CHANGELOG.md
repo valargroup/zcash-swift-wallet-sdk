@@ -6,6 +6,50 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # Unreleased
 
+## Changed
+- New wallets now use the chain-tip tree state from the lightwalletd server as the wallet birthday, eliminating unnecessary block scanning on first launch. Falls back to the bundled checkpoint if the server is unreachable.
+
+# 2.4.9 - 2026-04-04
+
+## Checkpoints
+
+Mainnet
+
+````
+Sources/ZcashLightClientKit/Resources/checkpoints/mainnet/3285000.json
+...
+Sources/ZcashLightClientKit/Resources/checkpoints/mainnet/3295000.json
+````
+
+Testnet
+
+````
+Sources/ZcashLightClientKit/Resources/checkpoints/testnet/3920000.json
+...
+Sources/ZcashLightClientKit/Resources/checkpoints/testnet/3930000.json
+````
+
+# 2.4.8 - 2026-03-25
+
+## Fixed
+- Networking connections are closed properly, resetting the state and letting the next re-run to properly initialize. This fixes the issues with restore after reset and also server switch issues. 
+
+## Checkpoints
+
+Mainnet
+
+````
+Sources/ZcashLightClientKit/Resources/checkpoints/mainnet/3280000.json
+...
+Sources/ZcashLightClientKit/Resources/checkpoints/mainnet/3282500.json
+````
+
+Testnet
+
+````
+Sources/ZcashLightClientKit/Resources/checkpoints/testnet/3910000.json
+````
+
 # 2.4.7 - 2026-03-20
 
 ## Checkpoints
