@@ -152,6 +152,26 @@ extension ClosureSDKSynchronizer: ClosureSynchronizer {
         }
     }
 
+    public func createProposedTransactionsWithoutSubmitting(
+        proposal: Proposal,
+        spendingKey: UnifiedSpendingKey,
+        completion: @escaping (Result<[ZcashTransaction.Overview], Error>) -> Void
+    ) {
+        AsyncToClosureGateway.executeThrowingAction(completion) {
+            try await self.synchronizer.createProposedTransactionsWithoutSubmitting(proposal: proposal, spendingKey: spendingKey)
+        }
+    }
+
+    public func submitTransaction(
+        _ rawTransaction: Data,
+        to endpoint: LightWalletEndpoint,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        AsyncToClosureGateway.executeThrowingAction(completion) {
+            try await self.synchronizer.submitTransaction(rawTransaction, to: endpoint)
+        }
+    }
+
     public func createPCZTFromProposal(
         accountUUID: AccountUUID,
         proposal: Proposal,

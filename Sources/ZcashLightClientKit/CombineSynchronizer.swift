@@ -92,6 +92,13 @@ public protocol CombineSynchronizer {
         spendingKey: UnifiedSpendingKey
     ) -> SinglePublisher<AsyncThrowingStream<TransactionSubmitResult, Error>, Error>
 
+    func createProposedTransactionsWithoutSubmitting(
+        proposal: Proposal,
+        spendingKey: UnifiedSpendingKey
+    ) -> SinglePublisher<[ZcashTransaction.Overview], Error>
+
+    func submitTransaction(_ rawTransaction: Data, to endpoint: LightWalletEndpoint) -> CompletablePublisher<Error>
+
     func createPCZTFromProposal(
         accountUUID: AccountUUID,
         proposal: Proposal

@@ -222,6 +222,29 @@ public protocol Synchronizer: AnyObject {
         spendingKey: UnifiedSpendingKey
     ) async throws -> AsyncThrowingStream<TransactionSubmitResult, Error>
 
+    /// Creates transactions for the given proposal without submitting them to the network.
+    /// Use this with `submitTransaction(_:to:)` to implement custom broadcast strategies
+    /// (e.g. submitting to multiple endpoints in parallel).
+    ///
+    /// - Parameter proposal: the proposal for which to create transactions.
+    /// - Parameter spendingKey: the spending key for the account.
+    /// - Returns: The created transactions with raw bytes available via the `raw` property (non-nil for freshly created transactions).
+    func createProposedTransactionsWithoutSubmitting(
+        proposal: Proposal,
+        spendingKey: UnifiedSpendingKey
+    ) async throws -> [ZcashTransaction.Overview]
+
+    /// Submits a raw transaction to a specific lightwalletd endpoint.
+    /// This creates a temporary connection to the given endpoint, submits the transaction,
+    /// and tears down the connection. Respects the current Tor configuration.
+    /// - Parameters:
+    ///   - rawTransaction: The raw transaction bytes to submit.
+    ///   - endpoint: The lightwalletd endpoint to submit to.
+    func submitTransaction(
+        _ rawTransaction: Data,
+        to endpoint: LightWalletEndpoint
+    ) async throws
+
     /// Attempts to propose fulfilling a [ZIP-321](https://zips.z.cash/zip-0321) payment URI by spending from the ZIP 32 account with the given index.
     ///  - Parameter uri: a valid ZIP-321 payment URI
     ///  - Parameter accountUUID: the account providing spend authority.

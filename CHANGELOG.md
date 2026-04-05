@@ -6,6 +6,10 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # Unreleased
 
+## Added
+- `Synchronizer.createProposedTransactionsWithoutSubmitting(proposal:spendingKey:)` — creates transactions locally without broadcasting, returning `[ZcashTransaction.Overview]` with raw bytes.
+- `Synchronizer.submitTransaction(_:to:)` — submits raw transaction bytes to a specific `LightWalletEndpoint`, enabling parallel broadcast to multiple lightwalletd servers. Respects Tor configuration.
+
 # 2.4.7 - 2026-03-20
 
 ## Checkpoints
