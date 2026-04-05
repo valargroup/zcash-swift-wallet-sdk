@@ -514,6 +514,125 @@ class CombineSynchronizerOfflineTests: XCTestCase {
         wait(for: [expectation], timeout: 0.5)
     }
 
+    func testCreateProposedTransactionsWithoutSubmittingSucceed() {
+        let proposal = Proposal.testOnlyFakeProposal(totalFee: 10)
+        let expectedTransactions = [data.clearedTransaction]
+
+        synchronizerMock.createProposedTransactionsWithoutSubmittingProposalSpendingKeyClosure = { receivedProposal, receivedSpendingKey in
+            XCTAssertEqual(receivedProposal, proposal)
+            XCTAssertEqual(receivedSpendingKey, self.data.spendingKey)
+            return expectedTransactions
+        }
+
+        let expectation = XCTestExpectation()
+
+        synchronizer.createProposedTransactionsWithoutSubmitting(proposal: proposal, spendingKey: data.spendingKey)
+            .sink(
+                receiveCompletion: { result in
+                    switch result {
+                    case .finished:
+                        expectation.fulfill()
+                    case let .failure(error):
+                        XCTFail("Unexpected failure with error: \(error)")
+                    }
+                },
+                receiveValue: { value in
+                    XCTAssertEqual(value.map { $0.rawID }, expectedTransactions.map { $0.rawID })
+                }
+            )
+            .store(in: &cancellables)
+
+        wait(for: [expectation], timeout: 0.5)
+    }
+
+    func testCreateProposedTransactionsWithoutSubmittingThrowsError() {
+        let proposal = Proposal.testOnlyFakeProposal(totalFee: 10)
+
+        synchronizerMock.createProposedTransactionsWithoutSubmittingProposalSpendingKeyClosure = { _, _ in
+            throw "Some error"
+        }
+
+        let expectation = XCTestExpectation()
+
+        synchronizer.createProposedTransactionsWithoutSubmitting(proposal: proposal, spendingKey: data.spendingKey)
+            .sink(
+                receiveCompletion: { result in
+                    switch result {
+                    case .finished:
+                        XCTFail("Error should be thrown.")
+                    case .failure:
+                        expectation.fulfill()
+                    }
+                },
+                receiveValue: { _ in
+                    XCTFail("No value is expected")
+                }
+            )
+            .store(in: &cancellables)
+
+        wait(for: [expectation], timeout: 0.5)
+    }
+
+    func testSubmitTransactionSucceeds() {
+        let rawTransaction = Data([0x01, 0x02, 0x03])
+        let endpoint = LightWalletEndpointBuilder.default
+
+        synchronizerMock.submitTransactionToClosure = { receivedRawTransaction, receivedEndpoint in
+            XCTAssertEqual(receivedRawTransaction, rawTransaction)
+            XCTAssertEqual(receivedEndpoint.host, endpoint.host)
+            XCTAssertEqual(receivedEndpoint.port, endpoint.port)
+            XCTAssertEqual(receivedEndpoint.secure, endpoint.secure)
+        }
+
+        let expectation = XCTestExpectation()
+
+        synchronizer.submitTransaction(rawTransaction, to: endpoint)
+            .sink(
+                receiveCompletion: { result in
+                    switch result {
+                    case .finished:
+                        expectation.fulfill()
+                    case let .failure(error):
+                        XCTFail("Unexpected failure with error: \(error)")
+                    }
+                },
+                receiveValue: { _ in
+                    XCTFail("No value is expected")
+                }
+            )
+            .store(in: &cancellables)
+
+        wait(for: [expectation], timeout: 0.5)
+    }
+
+    func testSubmitTransactionThrowsError() {
+        let rawTransaction = Data([0x01, 0x02, 0x03])
+
+        synchronizerMock.submitTransactionToClosure = { _, _ in
+            throw "Some error"
+        }
+
+        let expectation = XCTestExpectation()
+
+        synchronizer.submitTransaction(rawTransaction, to: LightWalletEndpointBuilder.default)
+            .sink(
+                receiveCompletion: { result in
+                    switch result {
+                    case .finished:
+                        XCTFail("Error should be thrown.")
+                    case .failure:
+                        expectation.fulfill()
+                    }
+                },
+                receiveValue: { _ in
+                    XCTFail("No value is expected")
+                }
+            )
+            .store(in: &cancellables)
+
+        wait(for: [expectation], timeout: 0.5)
+    }
+
     func testLatestHeightSucceed() {
         synchronizerMock.latestHeightClosure = { 123000 }
 

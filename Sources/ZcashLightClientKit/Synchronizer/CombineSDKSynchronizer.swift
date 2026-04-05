@@ -131,6 +131,21 @@ extension CombineSDKSynchronizer: CombineSynchronizer {
         }
     }
 
+    public func createProposedTransactionsWithoutSubmitting(
+        proposal: Proposal,
+        spendingKey: UnifiedSpendingKey
+    ) -> SinglePublisher<[ZcashTransaction.Overview], Error> {
+        AsyncToCombineGateway.executeThrowingAction() {
+            try await self.synchronizer.createProposedTransactionsWithoutSubmitting(proposal: proposal, spendingKey: spendingKey)
+        }
+    }
+
+    public func submitTransaction(_ rawTransaction: Data, to endpoint: LightWalletEndpoint) -> CompletablePublisher<Error> {
+        AsyncToCombineGateway.executeThrowingAction() {
+            try await self.synchronizer.submitTransaction(rawTransaction, to: endpoint)
+        }
+    }
+
     public func createPCZTFromProposal(
         accountUUID: AccountUUID,
         proposal: Proposal
