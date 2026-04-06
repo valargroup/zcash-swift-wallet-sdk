@@ -39,11 +39,16 @@ public struct WitnessBackend: Sendable {
         let urlBytes = [UInt8](pirServerUrl.utf8)
 
         struct PositionInput: Codable {
-            let note_id: Int64
+            let noteId: Int64
             let position: UInt64
+
+            enum CodingKeys: String, CodingKey {
+                case noteId = "note_id"
+                case position
+            }
         }
 
-        let positions = notes.map { PositionInput(note_id: $0.id, position: $0.position) }
+        let positions = notes.map { PositionInput(noteId: $0.id, position: $0.position) }
         let positionsJSON = try JSONEncoder().encode(positions)
 
         var context = WitnessProgressContext(handler: progress)
