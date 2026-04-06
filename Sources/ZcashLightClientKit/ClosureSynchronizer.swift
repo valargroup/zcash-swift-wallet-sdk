@@ -97,6 +97,18 @@ public protocol ClosureSynchronizer {
         completion: @escaping (Result<AsyncThrowingStream<TransactionSubmitResult, Error>, Error>) -> Void
     )
 
+    func createProposedTransactionsWithoutSubmitting(
+        proposal: Proposal,
+        spendingKey: UnifiedSpendingKey,
+        completion: @escaping (Result<[ZcashTransaction.Overview], Error>) -> Void
+    )
+
+    func submitTransaction(
+        _ rawTransaction: Data,
+        to endpoint: LightWalletEndpoint,
+        completion: @escaping (Result<Void, Error>) -> Void
+    )
+
     func createPCZTFromProposal(
         accountUUID: AccountUUID,
         proposal: Proposal,

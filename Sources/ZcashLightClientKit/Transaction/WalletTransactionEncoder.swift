@@ -142,7 +142,7 @@ class WalletTransactionEncoder: TransactionEncoder {
             : ServiceMode.direct
         )
 
-        guard response.errorCode >= 0 else {
+        guard response.errorCode == 0 else {
             throw TransactionEncoderError.submitError(code: Int(response.errorCode), message: response.errorMessage)
         }
     }

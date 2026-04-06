@@ -1706,6 +1706,49 @@ class SynchronizerMock: Synchronizer {
         }
     }
 
+    // MARK: - createProposedTransactionsWithoutSubmitting
+
+    var createProposedTransactionsWithoutSubmittingProposalSpendingKeyThrowableError: Error?
+    var createProposedTransactionsWithoutSubmittingProposalSpendingKeyCallsCount = 0
+    var createProposedTransactionsWithoutSubmittingProposalSpendingKeyCalled: Bool {
+        return createProposedTransactionsWithoutSubmittingProposalSpendingKeyCallsCount > 0
+    }
+    var createProposedTransactionsWithoutSubmittingProposalSpendingKeyReturnValue: [ZcashTransaction.Overview]!
+    var createProposedTransactionsWithoutSubmittingProposalSpendingKeyClosure: ((Proposal, UnifiedSpendingKey) async throws -> [ZcashTransaction.Overview])?
+
+    func createProposedTransactionsWithoutSubmitting(proposal: Proposal, spendingKey: UnifiedSpendingKey) async throws -> [ZcashTransaction.Overview] {
+        if let error = createProposedTransactionsWithoutSubmittingProposalSpendingKeyThrowableError {
+            throw error
+        }
+        createProposedTransactionsWithoutSubmittingProposalSpendingKeyCallsCount += 1
+        if let closure = createProposedTransactionsWithoutSubmittingProposalSpendingKeyClosure {
+            return try await closure(proposal, spendingKey)
+        } else {
+            return createProposedTransactionsWithoutSubmittingProposalSpendingKeyReturnValue
+        }
+    }
+
+    // MARK: - submitTransaction
+
+    var submitTransactionToThrowableError: Error?
+    var submitTransactionToCallsCount = 0
+    var submitTransactionToCalled: Bool {
+        return submitTransactionToCallsCount > 0
+    }
+    var submitTransactionToReceivedArguments: (rawTransaction: Data, endpoint: LightWalletEndpoint)?
+    var submitTransactionToClosure: ((Data, LightWalletEndpoint) async throws -> Void)?
+
+    func submitTransaction(_ rawTransaction: Data, to endpoint: LightWalletEndpoint) async throws {
+        if let error = submitTransactionToThrowableError {
+            throw error
+        }
+        submitTransactionToCallsCount += 1
+        submitTransactionToReceivedArguments = (rawTransaction: rawTransaction, endpoint: endpoint)
+        if let closure = submitTransactionToClosure {
+            try await closure(rawTransaction, endpoint)
+        }
+    }
+
     // MARK: - proposefulfillingPaymentURI
 
     var proposefulfillingPaymentURIAccountUUIDThrowableError: Error?
