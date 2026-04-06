@@ -1133,6 +1133,45 @@ public class SDKSynchronizer: Synchronizer {
         try await initializer.rustBackend.getPIRPendingSpends()
     }
 
+    public func fetchNoteWitnesses(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> WitnessResult {
+        let notes = try await initializer.rustBackend.getNotesNeedingPIRWitness()
+        guard !notes.isEmpty else {
+            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+        }
+
+        let witnessResult = try await Task.detached(priority: .userInitiated) {
+            try WitnessBackend().fetchWitnesses(
+                notes: notes,
+                pirServerUrl: pirServerUrl,
+                progress: progress
+            )
+        }.value
+
+        guard !witnessResult.witnesses.isEmpty else {
+            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+        }
+
+        try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+
+        let witnessedIds = witnessResult.witnesses.map(\.noteId)
+        let totalValue = notes
+            .filter { witnessedIds.contains($0.id) }
+            .map(\.value)
+            .reduce(0, +)
+
+        return WitnessResult(
+            witnessedNoteIds: witnessedIds,
+            totalWitnessedValue: totalValue
+        )
+    }
+
+    public func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
+        try await initializer.rustBackend.getPIRWitnessedNotes()
+    }
+
     // MARK: Server switch
 
     public func switchTo(endpoint: LightWalletEndpoint) async throws {

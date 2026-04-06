@@ -542,6 +542,24 @@ public protocol Synchronizer: AnyObject {
     /// Return PIR-detected spent notes whose spends have not yet been confirmed
     /// by the block scanner. Queries the wallet DB read-only.
     func getPIRPendingSpends() async throws -> PIRPendingSpends
+
+    /// Fetch note commitment witnesses from the PIR server for notes discovered
+    /// during sync whose shards are not yet fully scanned.
+    ///
+    /// Orchestrates: DB read (notes needing witnesses) → PIR server fetch →
+    /// DB write (store witnesses). Notes with witnesses bypass the shard-scanned
+    /// gate in coin selection, making them immediately spendable.
+    ///
+    /// - Parameters:
+    ///   - pirServerUrl: Base URL of the witness PIR server.
+    ///   - progress: Optional progress callback (0.0..1.0).
+    func fetchNoteWitnesses(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> WitnessResult
+
+    /// Returns notes that have PIR witnesses and are still unspent.
+    func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote]
 }
 
 public enum SyncStatus: Equatable {

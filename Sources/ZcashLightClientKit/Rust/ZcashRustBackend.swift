@@ -1356,6 +1356,67 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
         return try JSONDecoder().decode(PIRPendingSpends.self, from: data)
     }
+
+    // MARK: - Witness PIR
+
+    @DBActor
+    func getNotesNeedingPIRWitness() async throws -> [PIRNotePosition] {
+        let ptr = zcashlc_get_notes_needing_pir_witness(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw WitnessBackendError.rustError(
+                lastErrorMessage(fallback: "`getNotesNeedingPIRWitness` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRNotePosition].self, from: data)
+    }
+
+    @DBActor
+    func insertPIRWitnesses(_ witnesses: [PIRWitnessEntry]) async throws {
+        let json = try JSONEncoder().encode(witnesses)
+
+        let result = json.withUnsafeBytes { buf in
+            zcashlc_insert_pir_witnesses(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count)
+            )
+        }
+
+        guard result == 0 else {
+            throw WitnessBackendError.rustError(
+                lastErrorMessage(fallback: "`insertPIRWitnesses` failed")
+            )
+        }
+    }
+
+    @DBActor
+    func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
+        let ptr = zcashlc_get_pir_witnessed_notes(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw WitnessBackendError.rustError(
+                lastErrorMessage(fallback: "`getPIRWitnessedNotes` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRWitnessedNote].self, from: data)
+    }
 }
 
 private extension ZcashRustBackend {

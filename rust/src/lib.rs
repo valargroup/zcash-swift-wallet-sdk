@@ -96,6 +96,7 @@ mod derivation;
 mod ffi;
 mod spendability;
 mod tor;
+mod witness;
 
 #[cfg(target_vendor = "apple")]
 mod os_log;
@@ -4191,8 +4192,7 @@ pub unsafe extern "C" fn zcashlc_insert_pir_spent_notes(
         let network = parse_network(network_id)?;
         let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
 
-        let ids_bytes =
-            unsafe { std::slice::from_raw_parts(note_ids_json, note_ids_json_len) };
+        let ids_bytes = unsafe { std::slice::from_raw_parts(note_ids_json, note_ids_json_len) };
         let note_ids: Vec<i64> = serde_json::from_slice(ids_bytes)
             .map_err(|e| anyhow!("failed to parse note_ids JSON: {e}"))?;
 
@@ -4252,6 +4252,181 @@ pub unsafe extern "C" fn zcashlc_get_pir_pending_spends_v2(
         };
 
         let json = serde_json::to_vec(&result)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
+// ---------------------------------------------------------------------------
+// Witness PIR FFI — DB-touching operations for PIR note commitment witnesses.
+// ---------------------------------------------------------------------------
+
+/// Returns Orchard notes that need a PIR witness: they have a tree position,
+/// are unspent, and their shard is not fully scanned.
+///
+/// Returns JSON `[{"id":i64,"position":u64,"value":u64}, ...]`, or null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and point to a path-encoded byte array of length `db_data_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_get_notes_needing_pir_witness(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let notes = db_data
+            .get_notes_needing_pir_witness()
+            .map_err(|e| anyhow!("failed to query notes needing PIR witness: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct Note {
+            id: i64,
+            position: u64,
+            value: u64,
+        }
+
+        let out: Vec<Note> = notes
+            .into_iter()
+            .map(|n| Note {
+                id: n.id,
+                position: n.position,
+                value: n.value,
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&out)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
+/// Inserts PIR-obtained witness data for notes into the wallet DB.
+///
+/// `witnesses_json` is a JSON array of:
+/// ```json
+/// [{"note_id": i64, "siblings": ["hex32bytes", ...], "anchor_height": u64, "anchor_root": "hex32bytes"}]
+/// ```
+///
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and point to a path-encoded byte array of length `db_data_len`.
+/// - `witnesses_json` must be non-null and point to a valid JSON byte array.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_insert_pir_witnesses(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+    witnesses_json: *const u8,
+    witnesses_json_len: usize,
+) -> i32 {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let json_bytes = unsafe { std::slice::from_raw_parts(witnesses_json, witnesses_json_len) };
+
+        #[derive(serde::Deserialize)]
+        struct WitnessInput {
+            note_id: i64,
+            siblings: Vec<String>,
+            anchor_height: u64,
+            anchor_root: String,
+        }
+
+        let inputs: Vec<WitnessInput> = serde_json::from_slice(json_bytes)
+            .map_err(|e| anyhow!("failed to parse witnesses JSON: {e}"))?;
+
+        for input in inputs {
+            if input.siblings.len() != 32 {
+                return Err(anyhow!(
+                    "witness for note {} has {} siblings, expected 32",
+                    input.note_id,
+                    input.siblings.len()
+                ));
+            }
+
+            let mut siblings = [[0u8; 32]; 32];
+            for (i, hex_str) in input.siblings.iter().enumerate() {
+                let bytes = hex::decode(hex_str).map_err(|e| {
+                    anyhow!("invalid hex in sibling {i} for note {}: {e}", input.note_id)
+                })?;
+                if bytes.len() != 32 {
+                    return Err(anyhow!(
+                        "sibling {i} for note {} is {} bytes, expected 32",
+                        input.note_id,
+                        bytes.len()
+                    ));
+                }
+                siblings[i].copy_from_slice(&bytes);
+            }
+
+            let anchor_root_bytes = hex::decode(&input.anchor_root).map_err(|e| {
+                anyhow!("invalid hex in anchor_root for note {}: {e}", input.note_id)
+            })?;
+            let anchor_root: [u8; 32] = anchor_root_bytes
+                .try_into()
+                .map_err(|_| anyhow!("anchor_root for note {} is not 32 bytes", input.note_id))?;
+
+            db_data
+                .insert_pir_witness(input.note_id, &siblings, input.anchor_height, &anchor_root)
+                .map_err(|e| {
+                    anyhow!(
+                        "failed to insert PIR witness for note {}: {e}",
+                        input.note_id
+                    )
+                })?;
+        }
+        Ok(0i32)
+    });
+    crate::unwrap_exc_or(res, -1)
+}
+
+/// Returns notes that have PIR witnesses and are still unspent.
+///
+/// Returns JSON `[{"note_id":i64,"value":u64,"anchor_height":u64}, ...]`,
+/// or null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and point to a path-encoded byte array of length `db_data_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let notes = db_data
+            .get_pir_witnessed_notes()
+            .map_err(|e| anyhow!("failed to query PIR witnessed notes: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct WitnessedNote {
+            note_id: i64,
+            value: u64,
+            anchor_height: u64,
+        }
+
+        let out: Vec<WitnessedNote> = notes
+            .into_iter()
+            .map(|n| WitnessedNote {
+                note_id: n.note_id,
+                value: n.value,
+                anchor_height: n.anchor_height,
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&out)?;
         Ok(ffi::BoxedSlice::some(json))
     });
     unwrap_exc_or_null(res)

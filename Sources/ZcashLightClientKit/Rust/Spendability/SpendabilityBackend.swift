@@ -69,25 +69,6 @@ public struct SpendabilityBackend: Sendable {
     }
 }
 
-// MARK: - Private helpers
-
-private extension SpendabilityBackend {
-    func lastErrorMessage(fallback: String) -> String {
-        let errorLen = zcashlc_last_error_length()
-        defer { zcashlc_clear_last_error() }
-
-        if errorLen > 0 {
-            let error = UnsafeMutablePointer<Int8>.allocate(capacity: Int(errorLen))
-            defer { error.deallocate() }
-            zcashlc_error_message_utf8(error, errorLen)
-            if let msg = String(validatingUTF8: error) {
-                return msg
-            }
-        }
-        return fallback
-    }
-}
-
 // MARK: - Progress callback trampoline
 
 private struct SpendabilityProgressContext {

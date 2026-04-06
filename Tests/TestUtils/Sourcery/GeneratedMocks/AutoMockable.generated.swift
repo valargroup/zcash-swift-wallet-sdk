@@ -2550,6 +2550,47 @@ class SynchronizerMock: Synchronizer {
             return getPIRPendingSpendsReturnValue
         }
     }
+
+    // MARK: - fetchNoteWitnesses
+
+    var fetchNoteWitnessesThrowableError: Error?
+    var fetchNoteWitnessesCallsCount = 0
+    var fetchNoteWitnessesReturnValue: WitnessResult!
+    var fetchNoteWitnessesClosure: ((String, SpendabilityProgressHandler?) async throws -> WitnessResult)?
+
+    func fetchNoteWitnesses(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> WitnessResult {
+        if let error = fetchNoteWitnessesThrowableError {
+            throw error
+        }
+        fetchNoteWitnessesCallsCount += 1
+        if let closure = fetchNoteWitnessesClosure {
+            return try await closure(pirServerUrl, progress)
+        } else {
+            return fetchNoteWitnessesReturnValue
+        }
+    }
+
+    // MARK: - getPIRWitnessedNotes
+
+    var getPIRWitnessedNotesThrowableError: Error?
+    var getPIRWitnessedNotesCallsCount = 0
+    var getPIRWitnessedNotesReturnValue: [PIRWitnessedNote] = []
+    var getPIRWitnessedNotesClosure: (() async throws -> [PIRWitnessedNote])?
+
+    func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
+        if let error = getPIRWitnessedNotesThrowableError {
+            throw error
+        }
+        getPIRWitnessedNotesCallsCount += 1
+        if let closure = getPIRWitnessedNotesClosure {
+            return try await closure()
+        } else {
+            return getPIRWitnessedNotesReturnValue
+        }
+    }
 }
 class TransactionRepositoryMock: TransactionRepository {
 
@@ -4035,6 +4076,60 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
             return try await closure()
         } else {
             return getPIRPendingSpendsReturnValue
+        }
+    }
+
+    // MARK: - getNotesNeedingPIRWitness
+
+    var getNotesNeedingPIRWitnessThrowableError: Error?
+    var getNotesNeedingPIRWitnessCallsCount = 0
+    var getNotesNeedingPIRWitnessReturnValue: [PIRNotePosition] = []
+    var getNotesNeedingPIRWitnessClosure: (() async throws -> [PIRNotePosition])?
+
+    func getNotesNeedingPIRWitness() async throws -> [PIRNotePosition] {
+        if let error = getNotesNeedingPIRWitnessThrowableError {
+            throw error
+        }
+        getNotesNeedingPIRWitnessCallsCount += 1
+        if let closure = getNotesNeedingPIRWitnessClosure {
+            return try await closure()
+        } else {
+            return getNotesNeedingPIRWitnessReturnValue
+        }
+    }
+
+    // MARK: - insertPIRWitnesses
+
+    var insertPIRWitnessesThrowableError: Error?
+    var insertPIRWitnessesCallsCount = 0
+    var insertPIRWitnessesReceivedWitnesses: [PIRWitnessEntry]?
+    var insertPIRWitnessesClosure: (([PIRWitnessEntry]) async throws -> Void)?
+
+    func insertPIRWitnesses(_ witnesses: [PIRWitnessEntry]) async throws {
+        if let error = insertPIRWitnessesThrowableError {
+            throw error
+        }
+        insertPIRWitnessesCallsCount += 1
+        insertPIRWitnessesReceivedWitnesses = witnesses
+        try await insertPIRWitnessesClosure?(witnesses)
+    }
+
+    // MARK: - getPIRWitnessedNotes
+
+    var getPIRWitnessedNotesThrowableError: Error?
+    var getPIRWitnessedNotesCallsCount = 0
+    var getPIRWitnessedNotesReturnValue: [PIRWitnessedNote] = []
+    var getPIRWitnessedNotesClosure: (() async throws -> [PIRWitnessedNote])?
+
+    func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
+        if let error = getPIRWitnessedNotesThrowableError {
+            throw error
+        }
+        getPIRWitnessedNotesCallsCount += 1
+        if let closure = getPIRWitnessedNotesClosure {
+            return try await closure()
+        } else {
+            return getPIRWitnessedNotesReturnValue
         }
     }
 

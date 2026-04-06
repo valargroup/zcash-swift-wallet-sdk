@@ -402,4 +402,16 @@ protocol ZcashRustBackendWelding {
 
     /// Returns PIR-detected spent notes not yet confirmed by the block scanner.
     func getPIRPendingSpends() async throws -> PIRPendingSpends
+
+    // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)
+
+    /// Returns Orchard notes that need a PIR witness: they have a tree position
+    /// but the shard containing them is not fully scanned.
+    func getNotesNeedingPIRWitness() async throws -> [PIRNotePosition]
+
+    /// Inserts PIR-obtained witnesses into the wallet DB.
+    func insertPIRWitnesses(_ witnesses: [PIRWitnessEntry]) async throws
+
+    /// Returns notes that have PIR witnesses and are still unspent.
+    func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote]
 }

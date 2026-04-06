@@ -12,14 +12,14 @@ use serde::Serialize;
 
 use crate::unwrap_exc_or_null;
 
-/// Converts a pointer and length to a UTF-8 string.
-unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
+pub(crate) unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
     Ok(std::str::from_utf8(bytes)?.to_string())
 }
 
-/// Converts a JSON value to a boxed slice.
-fn json_to_boxed_slice<T: Serialize>(value: &T) -> anyhow::Result<*mut crate::ffi::BoxedSlice> {
+pub(crate) fn json_to_boxed_slice<T: Serialize>(
+    value: &T,
+) -> anyhow::Result<*mut crate::ffi::BoxedSlice> {
     let json = serde_json::to_vec(value)?;
     Ok(crate::ffi::BoxedSlice::some(json))
 }
@@ -54,8 +54,7 @@ pub unsafe extern "C" fn zcashlc_check_nullifiers_pir(
     let progress_context = AssertUnwindSafe(progress_context);
     let res = catch_panic(|| {
         let url = unsafe { str_from_ptr(pir_server_url, pir_server_url_len) }?;
-        let nf_bytes =
-            unsafe { std::slice::from_raw_parts(nullifiers_json, nullifiers_json_len) };
+        let nf_bytes = unsafe { std::slice::from_raw_parts(nullifiers_json, nullifiers_json_len) };
 
         let nf_vecs: Vec<Vec<u8>> = serde_json::from_slice(nf_bytes)
             .map_err(|e| anyhow!("failed to parse nullifiers JSON: {e}"))?;
