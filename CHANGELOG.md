@@ -15,6 +15,13 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `Synchronizer.createProposedTransactionsWithoutSubmitting(proposal:spendingKey:)` — creates transactions locally without broadcasting, returning `[ZcashTransaction.Overview]` with raw bytes.
 - `Synchronizer.submitTransaction(_:to:)` — submits raw transaction bytes to a specific `LightWalletEndpoint`, enabling parallel broadcast to multiple lightwalletd servers. Respects Tor configuration.
+- Nullifier PIR (Private Information Retrieval) integration for Orchard note spendability detection without waiting for shard-tree scanning.
+  - `SpendabilityBackend` / `SpendabilityTypes` — Swift wrappers for the new Rust FFI.
+  - `Synchronizer.checkWalletSpendability` / `getPIRPendingSpends` — public API surface.
+  - `SDKFlags.pirCompleted` lifecycle flag.
+- Witness PIR integration for fetching Orchard note commitment witnesses from a PIR server, bypassing the shard-scanned gate and making notes immediately spendable.
+  - `WitnessBackend` / `WitnessTypes` — Swift wrappers for witness PIR FFI.
+  - `Synchronizer.fetchNoteWitnesses` / `getPIRWitnessedNotes` — public API surface.
 
 ## Fixed
 

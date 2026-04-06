@@ -391,4 +391,27 @@ protocol ZcashRustBackendWelding {
     
     /// Attempts to delete an account defined by UUID
     func deleteAccount(_ accountUUID: AccountUUID) async throws
+
+    // MARK: - PIR (serialized through @DBActor, no standalone connections)
+
+    /// Returns unspent Orchard notes with nullifiers for PIR spend-checking.
+    func getUnspentOrchardNotesForPIR() async throws -> [PIRUnspentNote]
+
+    /// Inserts PIR-detected spent note IDs into the wallet DB.
+    func insertPIRSpentNotes(_ noteIds: [Int64]) async throws
+
+    /// Returns PIR-detected spent notes not yet confirmed by the block scanner.
+    func getPIRPendingSpends() async throws -> PIRPendingSpends
+
+    // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)
+
+    /// Returns Orchard notes that need a PIR witness: they have a tree position
+    /// but the shard containing them is not fully scanned.
+    func getNotesNeedingPIRWitness() async throws -> [PIRNotePosition]
+
+    /// Inserts PIR-obtained witnesses into the wallet DB.
+    func insertPIRWitnesses(_ witnesses: [PIRWitnessEntry]) async throws
+
+    /// Returns notes that have PIR witnesses and are still unspent.
+    func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote]
 }

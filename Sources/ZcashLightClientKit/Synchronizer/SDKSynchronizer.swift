@@ -1079,7 +1079,6 @@ public class SDKSynchronizer: Synchronizer {
         let treeState = try await initializer.lightWalletService.getTreeState(blockID, mode: .direct)
         return try treeState.serializedData()
     }
-
     public func getSingleUseTransparentAddress(accountUUID: AccountUUID) async throws -> SingleUseTransparentAddress {
         try await initializer.rustBackend.getSingleUseTransparentAddress(accountUUID: accountUUID)
     }
@@ -1140,6 +1139,87 @@ public class SDKSynchronizer: Synchronizer {
     
     public func deleteAccount(_ accountUUID: AccountUUID) async throws {
         try await initializer.rustBackend.deleteAccount(accountUUID)
+    }
+
+    public func checkWalletSpendability(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> SpendabilityResult {
+        // Read unspent notes (@DBActor — serialized with sync)
+        let notes = try await initializer.rustBackend.getUnspentOrchardNotesForPIR()
+        guard !notes.isEmpty else {
+            return SpendabilityResult(earliestHeight: 0, latestHeight: 0, spentNoteIds: [], totalSpentValue: 0)
+        }
+
+        // Check nullifiers against PIR server (detached — no DB connection held)
+        let checkResult = try await Task.detached(priority: .userInitiated) {
+            try SpendabilityBackend().checkNullifiersPIR(
+                notes: notes,
+                pirServerUrl: pirServerUrl,
+                progress: progress
+            )
+        }.value
+
+        // Identify spent notes
+        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 }
+        let spentNoteIds = spentNotes.map(\.0.id)
+        let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
+
+        // Insert spent notes (@DBActor — serialized with sync)
+        if !spentNoteIds.isEmpty {
+            try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
+        }
+
+        await sdkFlags.markPIRCompleted()
+        return SpendabilityResult(
+            earliestHeight: checkResult.earliestHeight,
+            latestHeight: checkResult.latestHeight,
+            spentNoteIds: spentNoteIds,
+            totalSpentValue: totalSpentValue
+        )
+    }
+
+    public func getPIRPendingSpends() async throws -> PIRPendingSpends {
+        try await initializer.rustBackend.getPIRPendingSpends()
+    }
+
+    public func fetchNoteWitnesses(
+        pirServerUrl: String,
+        progress: SpendabilityProgressHandler?
+    ) async throws -> WitnessResult {
+        let notes = try await initializer.rustBackend.getNotesNeedingPIRWitness()
+        guard !notes.isEmpty else {
+            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+        }
+
+        let witnessResult = try await Task.detached(priority: .userInitiated) {
+            try WitnessBackend().fetchWitnesses(
+                notes: notes,
+                pirServerUrl: pirServerUrl,
+                progress: progress
+            )
+        }.value
+
+        guard !witnessResult.witnesses.isEmpty else {
+            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+        }
+
+        try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+
+        let witnessedIds = witnessResult.witnesses.map(\.noteId)
+        let totalValue = notes
+            .filter { witnessedIds.contains($0.id) }
+            .map(\.value)
+            .reduce(0, +)
+
+        return WitnessResult(
+            witnessedNoteIds: witnessedIds,
+            totalWitnessedValue: totalValue
+        )
+    }
+
+    public func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
+        try await initializer.rustBackend.getPIRWitnessedNotes()
     }
 
     // MARK: Server switch

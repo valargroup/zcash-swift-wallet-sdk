@@ -27,7 +27,7 @@ zcash_client_backend = { version = "0.21", features = [
     "transparent-inputs",
     "unstable",
 ] }
-zcash_client_sqlite = { version = "0.19", features = ["orchard", "transparent-inputs", "unstable", "serde"] }
+zcash_client_sqlite = { version = "0.19", features = ["orchard", "transparent-inputs", "unstable", "serde", "spendability-pir"] }
 zcash_note_encryption = "0.4.1"
 zcash_primitives = "0.26"
 zcash_proofs = "0.26"
@@ -83,6 +83,15 @@ voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git" }
 zcash_keys = { version = "0.12", features = ["orchard"] }
 incrementalmerkletree = { version = "0.8", default-features = false }
 
+# Spendability PIR
+hex = "0.4"
+spend-client = { git = "https://github.com/valargroup/spendability-pir.git", rev = "bd5ef155bc84d0e25c6a14df31d470d16fc20aeb" }
+spend-types = { git = "https://github.com/valargroup/spendability-pir.git", rev = "bd5ef155bc84d0e25c6a14df31d470d16fc20aeb" }
+witness-client = { git = "https://github.com/valargroup/spendability-pir.git", rev = "bd5ef155bc84d0e25c6a14df31d470d16fc20aeb" }
+
+[dev-dependencies]
+zcash_client_sqlite = { version = "0.19", features = ["test-dependencies"] }
+
 [build-dependencies]
 bindgen = "0.72"
 cbindgen = "0.29"
@@ -112,3 +121,4 @@ zcash_transparent = { git = "https://github.com/valargroup/librustzcash.git", br
 zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
 zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
 zcash_primitives  = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
+zcash_proofs      = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
