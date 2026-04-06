@@ -468,7 +468,52 @@ public class SDKSynchronizer: Synchronizer {
             }
         }
     }
-    
+
+    public func createProposedTransactionsWithoutSubmitting(
+        proposal: Proposal,
+        spendingKey: UnifiedSpendingKey
+    ) async throws -> [ZcashTransaction.Overview] {
+        try throwIfUnprepared()
+
+        try await SaplingParameterDownloader.downloadParamsIfnotPresent(
+            spendURL: initializer.spendParamsURL,
+            spendSourceURL: initializer.saplingParamsSourceURL.spendParamFileURL,
+            outputURL: initializer.outputParamsURL,
+            outputSourceURL: initializer.saplingParamsSourceURL.outputParamFileURL,
+            logger: logger
+        )
+
+        let transactions = try await transactionEncoder.createProposedTransactions(
+            proposal: proposal,
+            spendingKey: spendingKey
+        )
+
+        if !transactions.isEmpty {
+            eventSubject.send(.foundTransactions(transactions, nil))
+        }
+
+        return transactions
+    }
+
+    public func submitTransaction(
+        _ rawTransaction: Data,
+        to endpoint: LightWalletEndpoint
+    ) async throws {
+        let torClient = initializer.container.resolve(TorClient.self)
+        let service = LightWalletGRPCServiceOverTor(endpoint: endpoint, tor: torClient)
+        defer { Task { await service.closeConnections() } }
+
+        let mode: ServiceMode = await sdkFlags.torEnabled ? .uniqueTor : .direct
+        let response = try await service.submit(spendTransaction: rawTransaction, mode: mode)
+
+        guard response.errorCode == 0 else {
+            throw TransactionEncoderError.submitError(
+                code: Int(response.errorCode),
+                message: response.errorMessage
+            )
+        }
+    }
+
     public func createPCZTFromProposal(accountUUID: AccountUUID, proposal: Proposal) async throws -> Pczt {
         try await initializer.rustBackend.createPCZTFromProposal(
             accountUUID: accountUUID,
