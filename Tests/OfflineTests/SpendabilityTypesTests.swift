@@ -61,18 +61,56 @@ final class SpendabilityTypesTests: XCTestCase {
         XCTAssertTrue(notes.isEmpty)
     }
 
+    // MARK: - PIRSpendMetadata
+
+    func testPIRSpendMetadataDecodesFromRustJSON() throws {
+        let json = """
+        {"spend_height":2800000,"first_output_position":12345678,"action_count":4}
+        """.data(using: .utf8)!
+
+        let meta = try decoder.decode(PIRSpendMetadata.self, from: json)
+
+        XCTAssertEqual(meta.spendHeight, 2_800_000)
+        XCTAssertEqual(meta.firstOutputPosition, 12_345_678)
+        XCTAssertEqual(meta.actionCount, 4)
+    }
+
+    func testPIRSpendMetadataRoundTrip() throws {
+        let meta = PIRSpendMetadata(spendHeight: 100, firstOutputPosition: 5000, actionCount: 3)
+        let data = try encoder.encode(meta)
+        let decoded = try decoder.decode(PIRSpendMetadata.self, from: data)
+
+        XCTAssertEqual(meta, decoded)
+    }
+
+    func testPIRSpendMetadataEncodesSnakeCaseKeys() throws {
+        let meta = PIRSpendMetadata(spendHeight: 100, firstOutputPosition: 5000, actionCount: 3)
+        let data = try encoder.encode(meta)
+        let jsonObject = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        XCTAssertNotNil(jsonObject["spend_height"])
+        XCTAssertNotNil(jsonObject["first_output_position"])
+        XCTAssertNotNil(jsonObject["action_count"])
+        XCTAssertNil(jsonObject["spendHeight"], "Should not use camelCase key")
+    }
+
     // MARK: - PIRNullifierCheckResult
 
     func testPIRNullifierCheckResultDecodesFromRustJSON() throws {
         let json = """
-        {"earliest_height":100,"latest_height":200,"spent":[true,false,true]}
+        {"earliest_height":100,"latest_height":200,"spent":[{"spend_height":150,"first_output_position":5000,"action_count":3},null,{"spend_height":180,"first_output_position":8000,"action_count":1}]}
         """.data(using: .utf8)!
 
         let result = try decoder.decode(PIRNullifierCheckResult.self, from: json)
 
         XCTAssertEqual(result.earliestHeight, 100)
         XCTAssertEqual(result.latestHeight, 200)
-        XCTAssertEqual(result.spent, [true, false, true])
+        XCTAssertEqual(result.spent.count, 3)
+        XCTAssertEqual(result.spent[0]?.spendHeight, 150)
+        XCTAssertEqual(result.spent[0]?.firstOutputPosition, 5000)
+        XCTAssertEqual(result.spent[0]?.actionCount, 3)
+        XCTAssertNil(result.spent[1])
+        XCTAssertEqual(result.spent[2]?.spendHeight, 180)
     }
 
     func testPIRNullifierCheckResultEmptySpent() throws {
@@ -88,7 +126,8 @@ final class SpendabilityTypesTests: XCTestCase {
     }
 
     func testPIRNullifierCheckResultEncodesSnakeCaseKeys() throws {
-        let result = PIRNullifierCheckResult(earliestHeight: 500, latestHeight: 1000, spent: [false, true])
+        let meta = PIRSpendMetadata(spendHeight: 100, firstOutputPosition: 5000, actionCount: 3)
+        let result = PIRNullifierCheckResult(earliestHeight: 500, latestHeight: 1000, spent: [nil, meta])
         let data = try encoder.encode(result)
         let jsonObject = try JSONSerialization.jsonObject(with: data) as! [String: Any]
 
@@ -99,7 +138,9 @@ final class SpendabilityTypesTests: XCTestCase {
     }
 
     func testPIRNullifierCheckResultRoundTrip() throws {
-        let result = PIRNullifierCheckResult(earliestHeight: 42, latestHeight: 99, spent: [true, true, false])
+        let meta1 = PIRSpendMetadata(spendHeight: 100, firstOutputPosition: 5000, actionCount: 2)
+        let meta2 = PIRSpendMetadata(spendHeight: 200, firstOutputPosition: 9000, actionCount: 1)
+        let result = PIRNullifierCheckResult(earliestHeight: 42, latestHeight: 99, spent: [meta1, meta2, nil])
         let data = try encoder.encode(result)
         let decoded = try decoder.decode(PIRNullifierCheckResult.self, from: data)
 
@@ -221,6 +262,9 @@ final class SpendabilityTypesTests: XCTestCase {
     // MARK: - Cross-type consistency: notes → check → result pipeline
 
     func testThreePhasePipelineTypes() throws {
+        let meta1 = PIRSpendMetadata(spendHeight: 150, firstOutputPosition: 5000, actionCount: 3)
+        let meta3 = PIRSpendMetadata(spendHeight: 180, firstOutputPosition: 8000, actionCount: 1)
+
         let notes = [
             PIRUnspentNote(id: 1, nf: [UInt8](repeating: 0xAA, count: 32), value: 10_000),
             PIRUnspentNote(id: 2, nf: [UInt8](repeating: 0xBB, count: 32), value: 20_000),
@@ -230,12 +274,12 @@ final class SpendabilityTypesTests: XCTestCase {
         let checkResult = PIRNullifierCheckResult(
             earliestHeight: 100,
             latestHeight: 200,
-            spent: [true, false, true]
+            spent: [meta1, nil, meta3]
         )
 
-        XCTAssertEqual(notes.count, checkResult.spent.count, "Spent flags must be parallel to notes")
+        XCTAssertEqual(notes.count, checkResult.spent.count, "Spent entries must be parallel to notes")
 
-        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 }
+        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 != nil }
         let spentNoteIds = spentNotes.map(\.0.id)
         let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
 
@@ -264,15 +308,18 @@ final class SpendabilityTypesTests: XCTestCase {
         let checkResult = PIRNullifierCheckResult(
             earliestHeight: 50,
             latestHeight: 150,
-            spent: [false, false]
+            spent: [nil, nil]
         )
 
-        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 }
+        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 != nil }
         XCTAssertTrue(spentNotes.isEmpty)
         XCTAssertEqual(spentNotes.map(\.0.value).reduce(0, +), 0)
     }
 
     func testThreePhasePipelineAllNotesSpent() throws {
+        let meta1 = PIRSpendMetadata(spendHeight: 100, firstOutputPosition: 3000, actionCount: 2)
+        let meta2 = PIRSpendMetadata(spendHeight: 120, firstOutputPosition: 4000, actionCount: 1)
+
         let notes = [
             PIRUnspentNote(id: 1, nf: [UInt8](repeating: 0xAA, count: 32), value: 10_000),
             PIRUnspentNote(id: 2, nf: [UInt8](repeating: 0xBB, count: 32), value: 20_000)
@@ -281,10 +328,10 @@ final class SpendabilityTypesTests: XCTestCase {
         let checkResult = PIRNullifierCheckResult(
             earliestHeight: 50,
             latestHeight: 150,
-            spent: [true, true]
+            spent: [meta1, meta2]
         )
 
-        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 }
+        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 != nil }
         XCTAssertEqual(spentNotes.count, 2)
         XCTAssertEqual(spentNotes.map(\.0.id), [1, 2])
         XCTAssertEqual(spentNotes.map(\.0.value).reduce(0, +), 30_000)
