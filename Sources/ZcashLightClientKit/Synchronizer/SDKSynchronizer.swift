@@ -1149,7 +1149,6 @@ public class SDKSynchronizer: Synchronizer {
             try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
         }
 
-        await sdkFlags.markPIRCompleted()
         return SpendabilityResult(
             earliestHeight: checkResult.earliestHeight,
             latestHeight: checkResult.latestHeight,

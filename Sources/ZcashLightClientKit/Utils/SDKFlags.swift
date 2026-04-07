@@ -29,11 +29,6 @@ actor SDKFlags {
     var chainTipUpdated = false
     var chainTipUpdatedTimestamp: TimeInterval = 0.0
 
-    /// Set after `checkWalletSpendability` succeeds. When true, Orchard
-    /// spendableValue is preserved even before `chainTipUpdated` is set.
-    var pirCompleted = false
-    var pirCompletedTimestamp: TimeInterval = 0.0
-
     /// Last witness PIR endpoint whose results were successfully inserted into
     /// the wallet during this SDK lifetime.
     var pirWitnessServerURL: String?
@@ -73,12 +68,6 @@ actor SDKFlags {
         chainTipUpdatedTimestamp = Date().timeIntervalSince1970
     }
 
-    /// Use to mark PIR spendability check as completed
-    func markPIRCompleted() {
-        pirCompleted = true
-        pirCompletedTimestamp = Date().timeIntervalSince1970
-    }
-
     func setPIRWitnessServerURL(_ url: String) {
         pirWitnessServerURL = url
     }
@@ -91,9 +80,6 @@ actor SDKFlags {
         if !chainTipUpdated && now - chainTipUpdatedTimestamp < 120 {
             chainTipUpdated = true
         }
-        if !pirCompleted && now - pirCompletedTimestamp < 120 {
-            pirCompleted = true
-        }
     }
 
     /// The client using the SDK called `stop()`, for example when the app is about to enter the background lifecycle.
@@ -103,6 +89,5 @@ actor SDKFlags {
         // The chain tip might be old enough to cause issues when attempting to send or shield funds before the next chain tip update call finishes.
         // Therefore, it is reset here.
         chainTipUpdated = false
-        pirCompleted = false
     }
 }

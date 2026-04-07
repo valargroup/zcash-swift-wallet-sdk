@@ -958,33 +958,21 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
             accountBalances[AccountUUID(id: accountBalance.uuidArray)] = accountBalance.toAccountBalance()
         }
         
-        // Modify spendable `accountBalances` if chainTip hasn't been updated yet
+        // Until the chain tip update action runs, transparent funds are withheld
+        // from spendable balance projection because shielding depends on a fresh tip.
+        // Shielded pool readiness is derived by the backend on a note-by-note basis.
         if await !sdkFlags.chainTipUpdated {
-            let pirDone = await sdkFlags.pirCompleted
             accountBalances.forEach { key, _ in
                 if let accountBalance = accountBalances[key] {
-                    // Sapling is always zeroed when chainTip is stale
                     let saplingBalance = PoolBalance(
                         spendableValue: .zero,
                         changePendingConfirmation: accountBalance.saplingBalance.changePendingConfirmation,
                         valuePendingSpendability: accountBalance.saplingBalance.valuePendingSpendability
                         + accountBalance.saplingBalance.spendableValue
                     )
-                    // Orchard is preserved if PIR has confirmed spendability
-                    let orchardBalance: PoolBalance
-                    if pirDone {
-                        orchardBalance = accountBalance.orchardBalance
-                    } else {
-                        orchardBalance = PoolBalance(
-                            spendableValue: .zero,
-                            changePendingConfirmation: accountBalance.orchardBalance.changePendingConfirmation,
-                            valuePendingSpendability: accountBalance.orchardBalance.valuePendingSpendability
-                            + accountBalance.orchardBalance.spendableValue
-                        )
-                    }
                     accountBalances[key] = AccountBalance(
                         saplingBalance: saplingBalance,
-                        orchardBalance: orchardBalance,
+                        orchardBalance: accountBalance.orchardBalance,
                         unshielded: .zero,
                         awaitingResolution: accountBalance.unshielded
                     )
