@@ -4079,6 +4079,45 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
         }
     }
 
+    // MARK: - discoverChangeNotes
+
+    var discoverChangeNotesThrowableError: Error?
+    var discoverChangeNotesCallsCount = 0
+    var discoverChangeNotesReturnValue: [PIRDiscoveredNote] = []
+    var discoverChangeNotesClosure: ((Int64, Data, UInt32, UInt8, UInt32) async throws -> [PIRDiscoveredNote])?
+
+    func discoverChangeNotes(
+        spentNoteId: Int64,
+        compactBlockBytes: Data,
+        firstOutputPosition: UInt32,
+        actionCount: UInt8,
+        spendHeight: UInt32
+    ) async throws -> [PIRDiscoveredNote] {
+        if let error = discoverChangeNotesThrowableError {
+            throw error
+        }
+        discoverChangeNotesCallsCount += 1
+        if let closure = discoverChangeNotesClosure {
+            return try await closure(spentNoteId, compactBlockBytes, firstOutputPosition, actionCount, spendHeight)
+        } else {
+            return discoverChangeNotesReturnValue
+        }
+    }
+
+    // MARK: - markProvisionalNoteWitnessed
+
+    var markProvisionalNoteWitnessedThrowableError: Error?
+    var markProvisionalNoteWitnessedCallsCount = 0
+    var markProvisionalNoteWitnessedClosure: ((Int64) async throws -> Void)?
+
+    func markProvisionalNoteWitnessed(noteId: Int64) async throws {
+        if let error = markProvisionalNoteWitnessedThrowableError {
+            throw error
+        }
+        markProvisionalNoteWitnessedCallsCount += 1
+        try await markProvisionalNoteWitnessedClosure?(noteId)
+    }
+
     // MARK: - getNotesNeedingPIRWitness
 
     var getNotesNeedingPIRWitnessThrowableError: Error?

@@ -403,6 +403,21 @@ protocol ZcashRustBackendWelding {
     /// Returns PIR-detected spent notes not yet confirmed by the block scanner.
     func getPIRPendingSpends() async throws -> PIRPendingSpends
 
+    // MARK: - Change discovery (serialized through @DBActor)
+
+    /// Trial-decrypts a compact block to discover change notes for a spent note.
+    /// Inserts discovered notes as provisional rows and returns their positions + IDs.
+    func discoverChangeNotes(
+        spentNoteId: Int64,
+        compactBlockBytes: Data,
+        firstOutputPosition: UInt32,
+        actionCount: UInt8,
+        spendHeight: UInt32
+    ) async throws -> [PIRDiscoveredNote]
+
+    /// Marks a provisional note as witnessed after a PIR witness is obtained.
+    func markProvisionalNoteWitnessed(noteId: Int64) async throws
+
     // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)
 
     /// Returns Orchard notes that need a PIR witness: they have a tree position

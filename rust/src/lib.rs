@@ -4574,9 +4574,9 @@ pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
 /// Discovers wallet-owned change notes in a CompactBlock and stores them
 /// as provisional notes in the wallet DB.
 ///
-/// Given spend metadata from the nullifier PIR check, trial-decrypts the
-/// block's actions to find notes owned by the wallet. Each discovered note
-/// is inserted into `pir_provisional_notes`.
+/// Looks up the account's Orchard FVK from `spent_note_id`'s account,
+/// trial-decrypts the block's actions, and inserts each discovered note
+/// into `pir_provisional_notes`.
 ///
 /// Returns JSON array of discovered notes:
 /// ```json
@@ -4588,7 +4588,6 @@ pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
 /// # Safety
 ///
 /// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
-/// - `account_uuid_bytes` must be non-null and point to exactly 16 bytes.
 /// - `compact_block_bytes` must be non-null and valid for reads for
 ///   `compact_block_bytes_len` bytes.
 #[unsafe(no_mangle)]
@@ -4596,7 +4595,6 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
     db_data: *const u8,
     db_data_len: usize,
     network_id: u32,
-    account_uuid_bytes: *const u8,
     spent_note_id: i64,
     compact_block_bytes: *const u8,
     compact_block_bytes_len: usize,
@@ -4607,9 +4605,12 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
     let res = catch_panic(|| {
         let network = parse_network(network_id)?;
         let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
-        let account_uuid = account_uuid_from_bytes(account_uuid_bytes)?;
         let block_bytes =
             unsafe { slice::from_raw_parts(compact_block_bytes, compact_block_bytes_len) };
+
+        // Look up the note's account and Orchard FVK from the DB.
+        let (account_id, account_uuid) =
+            db_data.get_account_for_orchard_note(spent_note_id)?;
 
         let account = (&db_data)
             .get_account(account_uuid)?
@@ -4649,7 +4650,7 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
         let mut results = Vec::with_capacity(discovered.len());
         for note in &discovered {
             let provisional_id = db_data.insert_pir_provisional_note(
-                account_uuid,
+                account_id,
                 spent_note_id,
                 note.value,
                 note.position,

@@ -1345,6 +1345,57 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return try JSONDecoder().decode(PIRPendingSpends.self, from: data)
     }
 
+    // MARK: - Change discovery
+
+    @DBActor
+    func discoverChangeNotes(
+        spentNoteId: Int64,
+        compactBlockBytes: Data,
+        firstOutputPosition: UInt32,
+        actionCount: UInt8,
+        spendHeight: UInt32
+    ) async throws -> [PIRDiscoveredNote] {
+        let ptr = compactBlockBytes.withUnsafeBytes { buf in
+            zcashlc_discover_change_notes(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                spentNoteId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count),
+                firstOutputPosition,
+                actionCount,
+                spendHeight
+            )
+        }
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`discoverChangeNotes` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRDiscoveredNote].self, from: data)
+    }
+
+    @DBActor
+    func markProvisionalNoteWitnessed(noteId: Int64) async throws {
+        let result = zcashlc_mark_provisional_note_witnessed(
+            dbData.0,
+            dbData.1,
+            networkType.networkId,
+            noteId
+        )
+
+        guard result == 0 else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`markProvisionalNoteWitnessed` failed")
+            )
+        }
+    }
+
     // MARK: - Witness PIR
 
     @DBActor

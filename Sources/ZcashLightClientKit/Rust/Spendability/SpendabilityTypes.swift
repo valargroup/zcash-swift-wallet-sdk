@@ -127,6 +127,31 @@ public struct PIRPendingSpends: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Discovered change note
+
+/// A change note discovered via PIR trial decryption and stored as a provisional
+/// note in the wallet DB. Returned by `discoverChangeNotes`.
+public struct PIRDiscoveredNote: Codable, Sendable, Equatable {
+    /// Global commitment tree position of this note.
+    public let position: UInt64
+    /// Note value in zatoshis.
+    public let value: UInt64
+    /// Row ID in pir_provisional_notes (used for witness PIR).
+    public let provisionalNoteId: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case position
+        case value
+        case provisionalNoteId = "provisional_note_id"
+    }
+
+    public init(position: UInt64, value: UInt64, provisionalNoteId: Int64) {
+        self.position = position
+        self.value = value
+        self.provisionalNoteId = provisionalNoteId
+    }
+}
+
 // MARK: - Progress
 
 /// Closure type for spendability check progress reporting.

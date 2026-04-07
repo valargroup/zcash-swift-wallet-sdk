@@ -1140,13 +1140,47 @@ public class SDKSynchronizer: Synchronizer {
         }.value
 
         // Identify spent notes (non-nil metadata = spent)
-        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 != nil }
+        let spentNotes: [(PIRUnspentNote, PIRSpendMetadata)] = zip(notes, checkResult.spent)
+            .compactMap { note, meta in meta.map { (note, $0) } }
         let spentNoteIds = spentNotes.map(\.0.id)
         let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
 
         // Insert spent notes (@DBActor — serialized with sync)
         if !spentNoteIds.isEmpty {
             try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
+        }
+
+        // Discover change notes: for each spent note, download the spending block
+        // and trial-decrypt to find change outputs owned by the wallet.
+        let service = initializer.lightWalletService
+        let mode = await sdkFlags.ifTor(.uniqueTor)
+        for (note, metadata) in spentNotes {
+            let height = BlockHeight(metadata.spendHeight)
+            do {
+                // Fetch the single compact block at spend_height.
+                var blockData: Data?
+                for try await block in try service.blockRange(height...height, mode: mode) {
+                    blockData = block.data
+                }
+                guard let compactBlockBytes = blockData else {
+                    logger.warn("Change discovery: no block at height \(height) for note \(note.id)")
+                    continue
+                }
+
+                let discovered = try await initializer.rustBackend.discoverChangeNotes(
+                    spentNoteId: note.id,
+                    compactBlockBytes: compactBlockBytes,
+                    firstOutputPosition: metadata.firstOutputPosition,
+                    actionCount: metadata.actionCount,
+                    spendHeight: metadata.spendHeight
+                )
+
+                if !discovered.isEmpty {
+                    logger.info("Change discovery: found \(discovered.count) note(s) at height \(height)")
+                }
+            } catch {
+                logger.warn("Change discovery failed for note \(note.id) at height \(height): \(error)")
+            }
         }
 
         return SpendabilityResult(
