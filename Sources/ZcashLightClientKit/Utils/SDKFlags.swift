@@ -33,6 +33,10 @@ actor SDKFlags {
     /// spendableValue is preserved even before `chainTipUpdated` is set.
     var pirCompleted = false
     var pirCompletedTimestamp: TimeInterval = 0.0
+
+    /// Last witness PIR endpoint whose results were successfully inserted into
+    /// the wallet during this SDK lifetime.
+    var pirWitnessServerURL: String?
     
     init(
         torEnabled: Bool,
@@ -73,6 +77,10 @@ actor SDKFlags {
     func markPIRCompleted() {
         pirCompleted = true
         pirCompletedTimestamp = Date().timeIntervalSince1970
+    }
+
+    func setPIRWitnessServerURL(_ url: String) {
+        pirWitnessServerURL = url
     }
 
     /// The client using the SDK called `start()`.

@@ -37,7 +37,13 @@ public struct PIRWitnessEntry: Codable, Sendable, Equatable {
         case anchorRoot = "anchor_root"
     }
 
-    public init(noteId: Int64, position: UInt64, siblings: [String], anchorHeight: UInt64, anchorRoot: String) {
+    public init(
+        noteId: Int64,
+        position: UInt64,
+        siblings: [String],
+        anchorHeight: UInt64,
+        anchorRoot: String
+    ) {
         self.noteId = noteId
         self.position = position
         self.siblings = siblings

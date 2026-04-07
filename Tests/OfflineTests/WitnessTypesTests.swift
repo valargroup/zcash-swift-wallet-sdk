@@ -118,6 +118,7 @@ final class WitnessTypesTests: XCTestCase {
 
         XCTAssertEqual(result.witnesses.count, 1)
         XCTAssertEqual(result.witnesses[0].noteId, 42)
+        XCTAssertEqual(result.witnesses[0].anchorRoot, root)
     }
 
     func testPIRWitnessResultEmpty() throws {
@@ -171,7 +172,11 @@ final class WitnessTypesTests: XCTestCase {
     }
 
     func testPIRWitnessedNoteRoundTrip() throws {
-        let note = PIRWitnessedNote(noteId: 99, value: 500_000, anchorHeight: 3_200_000)
+        let note = PIRWitnessedNote(
+            noteId: 99,
+            value: 500_000,
+            anchorHeight: 3_200_000
+        )
         let data = try encoder.encode(note)
         let decoded = try decoder.decode(PIRWitnessedNote.self, from: data)
 

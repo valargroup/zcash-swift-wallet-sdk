@@ -4098,6 +4098,27 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
         }
     }
 
+    // MARK: - getPIRWitnessNotes
+
+    var getPIRWitnessNotesThrowableError: Error?
+    var getPIRWitnessNotesCallsCount = 0
+    var getPIRWitnessNotesReceivedProposal: FfiProposal?
+    var getPIRWitnessNotesReturnValue: [PIRNotePosition] = []
+    var getPIRWitnessNotesClosure: ((FfiProposal) async throws -> [PIRNotePosition])?
+
+    func getPIRWitnessNotes(for proposal: FfiProposal) async throws -> [PIRNotePosition] {
+        if let error = getPIRWitnessNotesThrowableError {
+            throw error
+        }
+        getPIRWitnessNotesCallsCount += 1
+        getPIRWitnessNotesReceivedProposal = proposal
+        if let closure = getPIRWitnessNotesClosure {
+            return try await closure(proposal)
+        } else {
+            return getPIRWitnessNotesReturnValue
+        }
+    }
+
     // MARK: - insertPIRWitnesses
 
     var insertPIRWitnessesThrowableError: Error?

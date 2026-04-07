@@ -74,7 +74,6 @@ pub unsafe extern "C" fn zcashlc_fetch_pir_witnesses(
             "witness FFI: connected"
         );
 
-        let anchor_height = client.anchor_height();
         let positions: Vec<u64> = inputs.iter().map(|i| i.position).collect();
 
         let t2 = std::time::Instant::now();
@@ -98,7 +97,7 @@ pub unsafe extern "C" fn zcashlc_fetch_pir_witnesses(
                 note_id: input.note_id,
                 position: input.position,
                 siblings: w.siblings.iter().map(hex::encode).collect(),
-                anchor_height,
+                anchor_height: w.anchor_height,
                 anchor_root: hex::encode(w.anchor_root),
             })
             .collect();
@@ -133,6 +132,7 @@ mod tests {
         assert_eq!(json["witnesses"][0]["note_id"], 42);
         assert_eq!(json["witnesses"][0]["position"], 1000);
         assert_eq!(json["witnesses"][0]["anchor_height"], 3200000);
+        assert_eq!(json["witnesses"][0]["anchor_root"], "bb".repeat(32));
     }
 
     #[test]
