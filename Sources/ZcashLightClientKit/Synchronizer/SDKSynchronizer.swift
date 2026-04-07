@@ -15,6 +15,8 @@ public class SDKSynchronizer: Synchronizer {
     private enum Constants {
         static let fixWitnessesLastVersionCall = "ud_fixWitnessesLastVersionCall"
     }
+
+    typealias PIRWitnessFetcher = @Sendable ([PIRNotePosition], String, SpendabilityProgressHandler?) throws -> PIRWitnessResult
     
     public var alias: ZcashSynchronizerAlias { initializer.alias }
 
@@ -49,6 +51,7 @@ public class SDKSynchronizer: Synchronizer {
     public let network: ZcashNetwork
     private var transactionEncoder: TransactionEncoder
     private let transactionRepository: TransactionRepository
+    private let pirWitnessFetcher: PIRWitnessFetcher
 
     private let syncSessionIDGenerator: SyncSessionIDGenerator
     private let syncSession: SyncSession
@@ -67,7 +70,14 @@ public class SDKSynchronizer: Synchronizer {
                 initializer: initializer,
                 walletBirthdayProvider: { initializer.walletBirthday }
             ),
-            syncSessionTicker: .live
+            syncSessionTicker: .live,
+            pirWitnessFetcher: { notes, pirServerUrl, progress in
+                try WitnessBackend().fetchWitnesses(
+                    notes: notes,
+                    pirServerUrl: pirServerUrl,
+                    progress: progress
+                )
+            }
         )
     }
 
@@ -77,13 +87,15 @@ public class SDKSynchronizer: Synchronizer {
         transactionEncoder: TransactionEncoder,
         transactionRepository: TransactionRepository,
         blockProcessor: CompactBlockProcessor,
-        syncSessionTicker: SessionTicker
+        syncSessionTicker: SessionTicker,
+        pirWitnessFetcher: @escaping PIRWitnessFetcher
     ) {
         self.connectionState = .idle
         self.underlyingStatus = GenericActor(status)
         self.initializer = initializer
         self.transactionEncoder = transactionEncoder
         self.transactionRepository = transactionRepository
+        self.pirWitnessFetcher = pirWitnessFetcher
         self.blockProcessor = blockProcessor
         self.network = initializer.network
         self.metrics = initializer.container.resolve(SDKMetrics.self)
@@ -430,10 +442,27 @@ public class SDKSynchronizer: Synchronizer {
             logger: logger
         )
 
-        let transactions = try await transactionEncoder.createProposedTransactions(
-            proposal: proposal,
-            spendingKey: spendingKey
-        )
+        let transactions: [ZcashTransaction.Overview]
+        do {
+            transactions = try await transactionEncoder.createProposedTransactions(
+                proposal: proposal,
+                spendingKey: spendingKey
+            )
+        } catch {
+            // Proposal-selected Orchard inputs can carry PIR witnesses that became
+            // stale relative to the anchor used during transaction construction.
+            // When that specific mismatch is detected, refresh just the witnesses
+            // for this proposal and retry transaction creation once. All other
+            // errors are rethrown unchanged.
+            if try await refreshProposalWitnessesIfNeeded(after: error, proposal: proposal) {
+                transactions = try await transactionEncoder.createProposedTransactions(
+                    proposal: proposal,
+                    spendingKey: spendingKey
+                )
+            } else {
+                throw error
+            }
+        }
         
         return submitTransactions(transactions)
     }
@@ -1170,7 +1199,6 @@ public class SDKSynchronizer: Synchronizer {
             try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
         }
 
-        await sdkFlags.markPIRCompleted()
         return SpendabilityResult(
             earliestHeight: checkResult.earliestHeight,
             latestHeight: checkResult.latestHeight,
@@ -1205,6 +1233,7 @@ public class SDKSynchronizer: Synchronizer {
         }
 
         try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+        await sdkFlags.setPIRWitnessServerURL(pirServerUrl)
 
         let witnessedIds = witnessResult.witnesses.map(\.noteId)
         let totalValue = notes
@@ -1220,6 +1249,61 @@ public class SDKSynchronizer: Synchronizer {
 
     public func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
         try await initializer.rustBackend.getPIRWitnessedNotes()
+    }
+
+    // Returns true only when the synchronizer refreshed and inserted replacement
+    // PIR witnesses for Orchard notes referenced by this proposal. The refresh is
+    // intentionally scoped to proposal-selected notes instead of all notes that
+    // need witnesses, and missing server URL / empty note sets / empty witness
+    // responses are treated as "no retry performed".
+    private func refreshProposalWitnessesIfNeeded(
+        after error: Error,
+        proposal: Proposal
+    ) async throws -> Bool {
+        guard isPIRWitnessMismatch(error) else {
+            return false
+        }
+
+        logger.debug("PIR witness retry triggered after error: \(error.localizedDescription)")
+
+        guard let witnessServerURL = await sdkFlags.pirWitnessServerURL else {
+            logger.warn("PIR witness retry skipped: no witness server URL recorded")
+            return false
+        }
+
+        let notes = try await initializer.rustBackend.getPIRWitnessNotes(for: proposal.inner)
+        guard !notes.isEmpty else {
+            logger.debug("PIR witness retry skipped: proposal contains no Orchard PIR witness candidates")
+            return false
+        }
+
+        logger.debug("Refreshing PIR witnesses for \(notes.count) proposal-selected Orchard notes")
+        let fetchWitnesses = pirWitnessFetcher
+        let witnessResult = try await Task.detached(priority: .userInitiated) {
+            try fetchWitnesses(notes, witnessServerURL, nil)
+        }.value
+
+        guard !witnessResult.witnesses.isEmpty else {
+            logger.debug("PIR witness retry skipped: witness server returned no witnesses")
+            return false
+        }
+
+        logger.debug("PIR witness retry fetched \(witnessResult.witnesses.count) witnesses")
+
+        try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+        return true
+    }
+
+    // This currently relies on Rust error message substrings. Keep the heuristic
+    // narrow for retry safety, but replace it with a structured error signal when
+    // the backend exposes one.
+    private func isPIRWitnessMismatch(_ error: Error) -> Bool {
+        guard case let ZcashError.rustCreateToAddress(rustError) = error else {
+            return false
+        }
+
+        return rustError.contains("incompatible PIR witness anchors")
+            || rustError.contains("All anchors must be equal")
     }
 
     // MARK: Server switch
