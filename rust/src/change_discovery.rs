@@ -301,23 +301,26 @@ mod tests {
         (fvk, prepared)
     }
 
-    fn make_encrypted_action(
+    fn make_encrypted_action_with_scope(
         fvk: &FullViewingKey,
+        scope: Scope,
+        value_raw: u64,
+        nf_seed: u8,
     ) -> (CompactAction, orchard::Note) {
         use rand::rngs::OsRng;
 
-        let recipient = fvk.address_at(0u64, Scope::Internal);
-        let nf_old = orchard::note::Nullifier::from_bytes(&[7u8; 32]).unwrap();
-        let value = orchard::value::NoteValue::from_raw(50_000);
-        let ovk = fvk.to_ovk(Scope::Internal);
+        let recipient = fvk.address_at(0u64, scope);
+        let nf_old = orchard::note::Nullifier::from_bytes(&[nf_seed; 32]).unwrap();
+        let value = orchard::value::NoteValue::from_raw(value_raw);
+        let ovk = fvk.to_ovk(scope);
 
-        fake_compact_action(
-            &mut OsRng,
-            nf_old,
-            recipient,
-            value,
-            Some(ovk),
-        )
+        fake_compact_action(&mut OsRng, nf_old, recipient, value, Some(ovk))
+    }
+
+    fn make_encrypted_action(
+        fvk: &FullViewingKey,
+    ) -> (CompactAction, orchard::Note) {
+        make_encrypted_action_with_scope(fvk, Scope::Internal, 50_000, 7)
     }
 
     #[test]
@@ -341,6 +344,7 @@ mod tests {
             note.nullifier,
             expected_note.nullifier(&fvk).to_bytes(),
         );
+        assert_eq!(note.cmx, actions[0].1.cmx().to_bytes());
     }
 
     #[test]
@@ -463,5 +467,55 @@ mod tests {
             note.nullifier,
             expected_note.nullifier(&fvk).to_bytes(),
         );
+        assert_eq!(note.cmx, compact_action.cmx().to_bytes());
+    }
+
+    #[test]
+    fn discover_external_scope_note() {
+        let sk = SpendingKey::from_zip32_seed(&[0u8; 32], 133, AccountId::ZERO).unwrap();
+        let fvk = FullViewingKey::from(&sk);
+        let (action, expected_note) =
+            make_encrypted_action_with_scope(&fvk, Scope::External, 75_000, 11);
+
+        let actions = vec![(3000u64, action.clone())];
+        let discovered = discover_notes_both_scopes(&fvk, &actions);
+
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].position, 3000);
+        assert_eq!(discovered[0].value, 75_000);
+        assert_eq!(
+            discovered[0].diversifier,
+            *expected_note.recipient().diversifier().as_array(),
+        );
+        assert_eq!(discovered[0].cmx, action.cmx().to_bytes());
+    }
+
+    #[test]
+    fn discover_multiple_notes_in_one_call() {
+        let sk = SpendingKey::from_zip32_seed(&[0u8; 32], 133, AccountId::ZERO).unwrap();
+        let fvk = FullViewingKey::from(&sk);
+
+        let (action1, _) = make_encrypted_action_with_scope(&fvk, Scope::Internal, 10_000, 1);
+        let (action2, _) = make_encrypted_action_with_scope(&fvk, Scope::Internal, 20_000, 2);
+        let (action3, _) = make_encrypted_action_with_scope(&fvk, Scope::Internal, 30_000, 3);
+
+        let actions = vec![
+            (100u64, action1),
+            (101u64, action2),
+            (102u64, action3),
+        ];
+        let discovered = discover_notes_both_scopes(&fvk, &actions);
+
+        assert_eq!(discovered.len(), 3);
+
+        let values: Vec<u64> = discovered.iter().map(|n| n.value).collect();
+        assert!(values.contains(&10_000));
+        assert!(values.contains(&20_000));
+        assert!(values.contains(&30_000));
+
+        let positions: Vec<u64> = discovered.iter().map(|n| n.position).collect();
+        assert!(positions.contains(&100));
+        assert!(positions.contains(&101));
+        assert!(positions.contains(&102));
     }
 }
