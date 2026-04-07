@@ -1353,8 +1353,11 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         compactBlockBytes: Data,
         firstOutputPosition: UInt32,
         actionCount: UInt8,
-        spendHeight: UInt32
+        spendHeight: UInt32,
+        depth: UInt32 = 1,
+        parentProvisionalId: Int64? = nil
     ) async throws -> [PIRDiscoveredNote] {
+        let parentId = parentProvisionalId ?? -1
         let ptr = compactBlockBytes.withUnsafeBytes { buf in
             zcashlc_discover_change_notes(
                 dbData.0,
@@ -1365,7 +1368,9 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
                 UInt(buf.count),
                 firstOutputPosition,
                 actionCount,
-                spendHeight
+                spendHeight,
+                depth,
+                parentId
             )
         }
 
@@ -1378,6 +1383,45 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
 
         let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
         return try JSONDecoder().decode([PIRDiscoveredNote].self, from: data)
+    }
+
+    @DBActor
+    func getProvisionalNotesForPIR() async throws -> [PIRProvisionalNote] {
+        let ptr = zcashlc_get_provisional_notes_for_pir(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`getProvisionalNotesForPIR` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRProvisionalNote].self, from: data)
+    }
+
+    @DBActor
+    func markProvisionalPIRResults(_ results: [PIRProvisionalResult]) async throws {
+        let jsonData = try JSONEncoder().encode(results)
+        let result = jsonData.withUnsafeBytes { buf in
+            zcashlc_mark_provisional_pir_results(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count)
+            )
+        }
+
+        guard result == 0 else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`markProvisionalPIRResults` failed")
+            )
+        }
     }
 
     @DBActor

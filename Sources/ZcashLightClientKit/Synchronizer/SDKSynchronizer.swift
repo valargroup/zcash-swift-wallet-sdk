@@ -1120,27 +1120,32 @@ public class SDKSynchronizer: Synchronizer {
         try await initializer.rustBackend.deleteAccount(accountUUID)
     }
 
-    /// Runs PIR-based spendability checking: queries a PIR server for nullifier
-    /// inclusion, downloads compact blocks for any spent notes, trial-decrypts
-    /// their actions to discover change outputs, and stores them as provisional
-    /// notes in the wallet database.
+    /// Runs PIR-based spendability checking with recursive change discovery.
+    ///
+    /// Phase 1: checks canonical unspent notes against the PIR server, discovers
+    /// depth-1 change notes via RPC block download + trial decryption.
+    ///
+    /// Phase 2: recursively checks discovered provisional notes, following the
+    /// spend chain until all leaves are unspent (or `maxDepth` is reached).
     ///
     /// - Parameters:
     ///   - pirServerUrl: URL of the PIR nullifier-check server.
     ///   - progress: Optional callback for progress reporting.
-    /// - Returns: Summary of the spendability check including which notes were
-    ///   found to be spent and the total value of those notes.
+    ///   - maxDepth: Maximum recursion depth (default 20). Safety cap to prevent
+    ///     runaway loops.
+    /// - Returns: Summary of the spendability check including which canonical
+    ///   notes were found to be spent and the total value of those notes.
     public func checkWalletSpendability(
         pirServerUrl: String,
-        progress: SpendabilityProgressHandler?
+        progress: SpendabilityProgressHandler?,
+        maxDepth: Int = 20
     ) async throws -> SpendabilityResult {
-        // Read unspent notes (@DBActor — serialized with sync)
+        // Phase 1: Check canonical unspent notes
         let notes = try await initializer.rustBackend.getUnspentOrchardNotesForPIR()
         guard !notes.isEmpty else {
             return SpendabilityResult(earliestHeight: 0, latestHeight: 0, spentNoteIds: [], totalSpentValue: 0)
         }
 
-        // Check nullifiers against PIR server (detached — no DB connection held)
         let checkResult = try await Task.detached(priority: .userInitiated) {
             try SpendabilityBackend().checkNullifiersPIR(
                 notes: notes,
@@ -1149,47 +1154,66 @@ public class SDKSynchronizer: Synchronizer {
             )
         }.value
 
-        // Identify spent notes (non-nil metadata = spent)
         let spentNotes: [(PIRUnspentNote, PIRSpendMetadata)] = zip(notes, checkResult.spent)
             .compactMap { note, meta in meta.map { (note, $0) } }
         let spentNoteIds = spentNotes.map(\.0.id)
         let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
 
-        // Insert spent notes (@DBActor — serialized with sync)
         if !spentNoteIds.isEmpty {
             try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
         }
 
-        // Discover change notes: for each spent note, download the spending block
-        // and trial-decrypt to find change outputs owned by the wallet.
+        // Depth-1 change discovery for canonical spent notes
         let service = initializer.lightWalletService
         let mode = await sdkFlags.ifTor(.uniqueTor)
         for (note, metadata) in spentNotes {
-            let height = BlockHeight(metadata.spendHeight)
-            do {
-                // Fetch the single compact block at spend_height.
-                var blockData: Data?
-                for try await block in try service.blockRange(height...height, mode: mode) {
-                    blockData = block.data
-                }
-                guard let compactBlockBytes = blockData else {
-                    logger.warn("Change discovery: no block at height \(height) for note \(note.id)")
-                    continue
-                }
+            await discoverChangeAtDepth(
+                service: service,
+                mode: mode,
+                spentNoteId: note.id,
+                metadata: metadata,
+                depth: 1,
+                parentProvisionalId: nil
+            )
+        }
 
-                let discovered = try await initializer.rustBackend.discoverChangeNotes(
-                    spentNoteId: note.id,
-                    compactBlockBytes: compactBlockBytes,
-                    firstOutputPosition: metadata.firstOutputPosition,
-                    actionCount: metadata.actionCount,
-                    spendHeight: metadata.spendHeight
+        // Phase 2: Recursive discovery of deeper provisional notes.
+        // Each iteration PIR-checks all unchecked provisionals and discovers
+        // the next depth level. Capped at maxDepth iterations as a safety limit.
+        for _ in 0..<maxDepth {
+            let unchecked = try await initializer.rustBackend.getProvisionalNotesForPIR()
+            guard !unchecked.isEmpty else { break }
+
+            // Convert to PIRUnspentNote for the PIR client (same nf/value shape)
+            let notesForPIR = unchecked.map {
+                PIRUnspentNote(id: $0.id, nf: $0.nf, value: $0.value)
+            }
+
+            let pirResult = try await Task.detached(priority: .userInitiated) {
+                try SpendabilityBackend().checkNullifiersPIR(
+                    notes: notesForPIR,
+                    pirServerUrl: pirServerUrl,
+                    progress: nil
                 )
+            }.value
 
-                if !discovered.isEmpty {
-                    logger.info("Change discovery: found \(discovered.count) note(s) at height \(height)")
-                }
-            } catch {
-                logger.warn("Change discovery failed for note \(note.id) at height \(height): \(error)")
+            let provisionalResults: [PIRProvisionalResult] = zip(unchecked, pirResult.spent)
+                .map { note, meta in PIRProvisionalResult(id: note.id, spent: meta != nil) }
+            try await initializer.rustBackend.markProvisionalPIRResults(provisionalResults)
+
+            let spentProvisionals: [(PIRProvisionalNote, PIRSpendMetadata)] = zip(unchecked, pirResult.spent)
+                .compactMap { note, meta in meta.map { (note, $0) } }
+            guard !spentProvisionals.isEmpty else { break }
+
+            for (provisional, metadata) in spentProvisionals {
+                await discoverChangeAtDepth(
+                    service: service,
+                    mode: mode,
+                    spentNoteId: provisional.spentNoteId,
+                    metadata: metadata,
+                    depth: provisional.depth + 1,
+                    parentProvisionalId: provisional.id
+                )
             }
         }
 
@@ -1199,6 +1223,45 @@ public class SDKSynchronizer: Synchronizer {
             spentNoteIds: spentNoteIds,
             totalSpentValue: totalSpentValue
         )
+    }
+
+    /// Fetches a compact block and trial-decrypts it to discover change notes
+    /// at a given depth in the spend chain.
+    private func discoverChangeAtDepth(
+        service: LightWalletService,
+        mode: ServiceMode,
+        spentNoteId: Int64,
+        metadata: PIRSpendMetadata,
+        depth: UInt32,
+        parentProvisionalId: Int64?
+    ) async {
+        let height = BlockHeight(metadata.spendHeight)
+        do {
+            var blockData: Data?
+            for try await block in try service.blockRange(height...height, mode: mode) {
+                blockData = block.data
+            }
+            guard let compactBlockBytes = blockData else {
+                logger.warn("Change discovery depth \(depth): no block at height \(height)")
+                return
+            }
+
+            let discovered = try await initializer.rustBackend.discoverChangeNotes(
+                spentNoteId: spentNoteId,
+                compactBlockBytes: compactBlockBytes,
+                firstOutputPosition: metadata.firstOutputPosition,
+                actionCount: metadata.actionCount,
+                spendHeight: metadata.spendHeight,
+                depth: depth,
+                parentProvisionalId: parentProvisionalId
+            )
+
+            if !discovered.isEmpty {
+                logger.info("Change discovery depth \(depth): found \(discovered.count) note(s) at height \(height)")
+            }
+        } catch {
+            logger.warn("Change discovery depth \(depth) failed at height \(height): \(error)")
+        }
     }
 
     public func getPIRPendingSpends() async throws -> PIRPendingSpends {

@@ -407,12 +407,19 @@ protocol ZcashRustBackendWelding {
 
     /// Trial-decrypts a compact block to discover change notes for a spent note.
     /// Inserts discovered notes as provisional rows and returns their positions + IDs.
+    ///
+    /// - Parameters:
+    ///   - depth: Hop count from the canonical note (1 = direct change).
+    ///   - parentProvisionalId: ID of the provisional note that was spent to produce
+    ///     these change notes, or `nil` for depth-1 notes whose parent is canonical.
     func discoverChangeNotes(
         spentNoteId: Int64,
         compactBlockBytes: Data,
         firstOutputPosition: UInt32,
         actionCount: UInt8,
-        spendHeight: UInt32
+        spendHeight: UInt32,
+        depth: UInt32,
+        parentProvisionalId: Int64?
     ) async throws -> [PIRDiscoveredNote]
 
     /// Marks a provisional note as witnessed after a PIR witness is obtained,
@@ -421,6 +428,14 @@ protocol ZcashRustBackendWelding {
     /// - Parameter noteId: The `provisionalNoteId` returned by ``discoverChangeNotes``,
     ///   **not** a canonical `orchard_received_notes` ID.
     func markProvisionalNoteWitnessed(noteId: Int64) async throws
+
+    /// Returns provisional notes whose nullifiers have not yet been PIR-checked.
+    /// Used by the recursive discovery loop to find notes that need checking.
+    func getProvisionalNotesForPIR() async throws -> [PIRProvisionalNote]
+
+    /// Updates provisional notes after PIR nullifier checks.
+    /// Each entry marks the note as checked; spent entries also set `is_spent = 1`.
+    func markProvisionalPIRResults(_ results: [PIRProvisionalResult]) async throws
 
     // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)
 

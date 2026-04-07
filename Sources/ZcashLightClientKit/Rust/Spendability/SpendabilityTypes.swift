@@ -152,6 +152,52 @@ public struct PIRDiscoveredNote: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Provisional note for PIR
+
+/// A provisional note ready for PIR nullifier checking.
+public struct PIRProvisionalNote: Codable, Sendable, Equatable {
+    public let id: Int64
+    /// Raw nullifier bytes (32 bytes).
+    public let nf: [UInt8]
+    public let value: UInt64
+    /// The canonical `orchard_received_notes` ID that started this chain.
+    public let spentNoteId: Int64
+    /// This note's depth in the chain (1 = direct change from canonical).
+    public let depth: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case nf
+        case value
+        case spentNoteId = "spent_note_id"
+        case depth
+    }
+
+    public init(id: Int64, nf: [UInt8], value: UInt64, spentNoteId: Int64, depth: UInt32) {
+        self.id = id
+        self.nf = nf
+        self.value = value
+        self.spentNoteId = spentNoteId
+        self.depth = depth
+    }
+}
+
+// MARK: - Provisional PIR result
+
+/// Result of a PIR nullifier check on a provisional note.
+/// Used by `markProvisionalPIRResults` to update the DB.
+public struct PIRProvisionalResult: Codable, Sendable, Equatable {
+    /// Row ID of the provisional note.
+    public let id: Int64
+    /// Whether the provisional note was found spent by PIR.
+    public let spent: Bool
+
+    public init(id: Int64, spent: Bool) {
+        self.id = id
+        self.spent = spent
+    }
+}
+
 // MARK: - Progress
 
 /// Closure type for spendability check progress reporting.

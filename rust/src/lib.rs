@@ -4578,6 +4578,10 @@ pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
 /// trial-decrypts the block's actions, and inserts each discovered note
 /// into `pir_provisional_notes`.
 ///
+/// `depth` is the hop count from the canonical note (1 = direct change).
+/// `parent_provisional_id` is the provisional note that was spent to produce
+/// these change notes (-1 for depth-1 notes whose parent is canonical).
+///
 /// Returns JSON array of discovered notes:
 /// ```json
 /// [{"position":u64,"value":u64,"provisional_note_id":i64}]
@@ -4609,12 +4613,20 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
     first_output_position: u32,
     action_count: u8,
     spend_height: u32,
+    depth: u32,
+    parent_provisional_id: i64,
 ) -> *mut ffi::BoxedSlice {
     let res = catch_panic(|| {
         let network = parse_network(network_id)?;
         let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
         let block_bytes =
             unsafe { slice::from_raw_parts(compact_block_bytes, compact_block_bytes_len) };
+
+        let parent_prov = if parent_provisional_id < 0 {
+            None
+        } else {
+            Some(parent_provisional_id)
+        };
 
         let (account_id, account_uuid) =
             db_data.get_account_for_orchard_note(spent_note_id)?;
@@ -4643,8 +4655,10 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
             count = discovered.len(),
             first_output_position,
             action_count,
-            "change discovery: found {} notes",
+            depth,
+            "change discovery: found {} notes at depth {}",
             discovered.len(),
+            depth,
         );
 
         #[derive(serde::Serialize)]
@@ -4667,6 +4681,8 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
                 &note.nullifier,
                 &note.cmx,
                 spend_height,
+                depth,
+                parent_prov,
             )?;
             results.push(DiscoveredNoteResult {
                 position: note.position,
@@ -4679,6 +4695,94 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
         Ok(ffi::BoxedSlice::some(json))
     });
     unwrap_exc_or_null(res)
+}
+
+/// Returns provisional notes whose nullifiers have not yet been PIR-checked.
+///
+/// Returns JSON `[{"id":i64,"nf":[u8],"value":u64,"spent_note_id":i64,"depth":u32}]`.
+///
+/// Returns null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_get_provisional_notes_for_pir(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let notes = db_data.get_provisional_notes_for_pir_check()?;
+
+        #[derive(serde::Serialize)]
+        struct ProvisionalForPIR {
+            id: i64,
+            nf: Vec<u8>,
+            value: u64,
+            spent_note_id: i64,
+            depth: u32,
+        }
+
+        let json_notes: Vec<ProvisionalForPIR> = notes
+            .into_iter()
+            .map(|n| ProvisionalForPIR {
+                id: n.id,
+                nf: n.nullifier.to_vec(),
+                value: n.value,
+                spent_note_id: n.spent_note_id,
+                depth: n.depth,
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&json_notes)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
+/// Updates provisional notes after PIR nullifier checks.
+///
+/// Takes JSON `[{"id":i64,"spent":bool}]`. For each entry, sets
+/// `pir_checked = 1`. If `spent` is true, also sets `is_spent = 1`.
+///
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `results_json` must be non-null and valid for reads for `results_json_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_mark_provisional_pir_results(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+    results_json: *const u8,
+    results_json_len: usize,
+) -> i32 {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let json_bytes = unsafe { slice::from_raw_parts(results_json, results_json_len) };
+
+        #[derive(serde::Deserialize)]
+        struct PIRResult {
+            id: i64,
+            spent: bool,
+        }
+
+        let results: Vec<PIRResult> = serde_json::from_slice(json_bytes)?;
+
+        for r in &results {
+            db_data.mark_provisional_pir_result(r.id, r.spent)?;
+        }
+
+        Ok(0i32)
+    });
+    unwrap_exc_or(res, -1)
 }
 
 /// Marks a provisional note as witnessed after a PIR witness is obtained,
