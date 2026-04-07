@@ -1139,8 +1139,8 @@ public class SDKSynchronizer: Synchronizer {
             )
         }.value
 
-        // Identify spent notes
-        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 }
+        // Identify spent notes (non-nil metadata = spent)
+        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 != nil }
         let spentNoteIds = spentNotes.map(\.0.id)
         let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
 

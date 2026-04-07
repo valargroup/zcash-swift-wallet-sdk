@@ -10,6 +10,8 @@ use anyhow::anyhow;
 use ffi_helpers::panic::catch_panic;
 use serde::Serialize;
 
+use spend_types::SpendMetadata;
+
 use crate::unwrap_exc_or_null;
 
 pub(crate) unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
@@ -28,8 +30,8 @@ pub(crate) fn json_to_boxed_slice<T: Serialize>(
 struct NullifierCheckResult {
     earliest_height: u64,
     latest_height: u64,
-    /// Parallel to the input nullifiers: true = spent.
-    spent: Vec<bool>,
+    /// Parallel to the input nullifiers: Some(meta) = spent, None = not spent.
+    spent: Vec<Option<SpendMetadata>>,
 }
 
 /// Checks nullifiers against the PIR server. No database access.
@@ -99,12 +101,28 @@ mod tests {
         let result = NullifierCheckResult {
             earliest_height: 100,
             latest_height: 200,
-            spent: vec![true, false, true],
+            spent: vec![
+                Some(SpendMetadata {
+                    spend_height: 150,
+                    first_output_position: 5000,
+                    action_count: 3,
+                }),
+                None,
+                Some(SpendMetadata {
+                    spend_height: 180,
+                    first_output_position: 8000,
+                    action_count: 1,
+                }),
+            ],
         };
         let json: serde_json::Value = serde_json::to_value(&result).unwrap();
         assert_eq!(json["earliest_height"], 100);
         assert_eq!(json["latest_height"], 200);
-        assert_eq!(json["spent"], serde_json::json!([true, false, true]));
+        assert_eq!(json["spent"][0]["spend_height"], 150);
+        assert_eq!(json["spent"][0]["first_output_position"], 5000);
+        assert_eq!(json["spent"][0]["action_count"], 3);
+        assert!(json["spent"][1].is_null());
+        assert_eq!(json["spent"][2]["spend_height"], 180);
     }
 
     #[test]

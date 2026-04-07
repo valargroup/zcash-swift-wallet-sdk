@@ -47,14 +47,38 @@ public struct PIRUnspentNote: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Spend metadata
+
+/// Per-nullifier metadata returned by the PIR server when a nullifier is found spent.
+public struct PIRSpendMetadata: Codable, Sendable, Equatable {
+    /// Block height at which the note was spent.
+    public let spendHeight: UInt32
+    /// Global Orchard commitment-tree position of the first output in the spending transaction.
+    public let firstOutputPosition: UInt32
+    /// Number of Orchard actions in the spending transaction.
+    public let actionCount: UInt8
+
+    enum CodingKeys: String, CodingKey {
+        case spendHeight = "spend_height"
+        case firstOutputPosition = "first_output_position"
+        case actionCount = "action_count"
+    }
+
+    public init(spendHeight: UInt32, firstOutputPosition: UInt32, actionCount: UInt8) {
+        self.spendHeight = spendHeight
+        self.firstOutputPosition = firstOutputPosition
+        self.actionCount = actionCount
+    }
+}
+
 // MARK: - Nullifier check result
 
 /// Result of checking nullifiers against the PIR server.
 public struct PIRNullifierCheckResult: Codable, Sendable, Equatable {
     public let earliestHeight: UInt64
     public let latestHeight: UInt64
-    /// Parallel to the input nullifiers: true = spent.
-    public let spent: [Bool]
+    /// Parallel to the input nullifiers: non-nil = spent (with metadata), nil = not spent.
+    public let spent: [PIRSpendMetadata?]
 
     enum CodingKeys: String, CodingKey {
         case earliestHeight = "earliest_height"
@@ -62,7 +86,7 @@ public struct PIRNullifierCheckResult: Codable, Sendable, Equatable {
         case spent
     }
 
-    public init(earliestHeight: UInt64, latestHeight: UInt64, spent: [Bool]) {
+    public init(earliestHeight: UInt64, latestHeight: UInt64, spent: [PIRSpendMetadata?]) {
         self.earliestHeight = earliestHeight
         self.latestHeight = latestHeight
         self.spent = spent
