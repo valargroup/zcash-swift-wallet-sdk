@@ -4587,9 +4587,17 @@ pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
 ///
 /// # Safety
 ///
-/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes, and it must have an
+///   alignment of `1`. Its contents must be a string representing a valid system path in the
+///   operating system's preferred representation.
+/// - The memory referenced by `db_data` must not be mutated for the duration of the function call.
+/// - The total size `db_data_len` must be no larger than `isize::MAX`. See the safety
+///   documentation of pointer::offset.
 /// - `compact_block_bytes` must be non-null and valid for reads for
-///   `compact_block_bytes_len` bytes.
+///   `compact_block_bytes_len` bytes, and it must have an alignment of `1`.
+/// - The memory referenced by `compact_block_bytes` must not be mutated for the duration of
+///   the function call.
+/// - The total size `compact_block_bytes_len` must be no larger than `isize::MAX`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zcashlc_discover_change_notes(
     db_data: *const u8,
@@ -4608,7 +4616,6 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
         let block_bytes =
             unsafe { slice::from_raw_parts(compact_block_bytes, compact_block_bytes_len) };
 
-        // Look up the note's account and Orchard FVK from the DB.
         let (account_id, account_uuid) =
             db_data.get_account_for_orchard_note(spent_note_id)?;
 
@@ -4674,13 +4681,22 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
     unwrap_exc_or_null(res)
 }
 
-/// Marks a provisional note as witnessed after a PIR witness is obtained.
+/// Marks a provisional note as witnessed after a PIR witness is obtained,
+/// making it eligible for spendable balance and coin selection.
+///
+/// `note_id` is the `provisional_note_id` returned by
+/// [`zcashlc_discover_change_notes`], not a canonical `orchard_received_notes` ID.
 ///
 /// Returns 0 on success, -1 on error.
 ///
 /// # Safety
 ///
-/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes, and it must have an
+///   alignment of `1`. Its contents must be a string representing a valid system path in the
+///   operating system's preferred representation.
+/// - The memory referenced by `db_data` must not be mutated for the duration of the function call.
+/// - The total size `db_data_len` must be no larger than `isize::MAX`. See the safety
+///   documentation of pointer::offset.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zcashlc_mark_provisional_note_witnessed(
     db_data: *const u8,

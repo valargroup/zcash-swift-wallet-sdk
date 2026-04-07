@@ -415,7 +415,11 @@ protocol ZcashRustBackendWelding {
         spendHeight: UInt32
     ) async throws -> [PIRDiscoveredNote]
 
-    /// Marks a provisional note as witnessed after a PIR witness is obtained.
+    /// Marks a provisional note as witnessed after a PIR witness is obtained,
+    /// making it eligible for spendable balance and coin selection.
+    ///
+    /// - Parameter noteId: The `provisionalNoteId` returned by ``discoverChangeNotes``,
+    ///   **not** a canonical `orchard_received_notes` ID.
     func markProvisionalNoteWitnessed(noteId: Int64) async throws
 
     // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)

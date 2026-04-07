@@ -1120,6 +1120,16 @@ public class SDKSynchronizer: Synchronizer {
         try await initializer.rustBackend.deleteAccount(accountUUID)
     }
 
+    /// Runs PIR-based spendability checking: queries a PIR server for nullifier
+    /// inclusion, downloads compact blocks for any spent notes, trial-decrypts
+    /// their actions to discover change outputs, and stores them as provisional
+    /// notes in the wallet database.
+    ///
+    /// - Parameters:
+    ///   - pirServerUrl: URL of the PIR nullifier-check server.
+    ///   - progress: Optional callback for progress reporting.
+    /// - Returns: Summary of the spendability check including which notes were
+    ///   found to be spent and the total value of those notes.
     public func checkWalletSpendability(
         pirServerUrl: String,
         progress: SpendabilityProgressHandler?
