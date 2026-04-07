@@ -422,12 +422,21 @@ protocol ZcashRustBackendWelding {
         parentProvisionalId: Int64?
     ) async throws -> [PIRDiscoveredNote]
 
-    /// Marks a provisional note as witnessed after a PIR witness is obtained,
+    /// Sets witness data on a provisional note after a PIR witness is obtained,
     /// making it eligible for spendable balance and coin selection.
     ///
-    /// - Parameter noteId: The `provisionalNoteId` returned by ``discoverChangeNotes``,
-    ///   **not** a canonical `orchard_received_notes` ID.
-    func markProvisionalNoteWitnessed(noteId: Int64) async throws
+    /// - Parameters:
+    ///   - noteId: The `provisionalNoteId` returned by ``discoverChangeNotes``,
+    ///     **not** a canonical `orchard_received_notes` ID.
+    ///   - siblings: 1024-byte Merkle authentication path (32 siblings x 32 bytes).
+    ///   - anchorHeight: The block height of the anchor.
+    ///   - anchorRoot: 32-byte anchor root hash.
+    func markProvisionalNoteWitnessed(
+        noteId: Int64,
+        siblings: Data,
+        anchorHeight: UInt64,
+        anchorRoot: Data
+    ) async throws
 
     /// Returns provisional notes whose nullifiers have not yet been PIR-checked.
     /// Used by the recursive discovery loop to find notes that need checking.

@@ -1425,13 +1425,27 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
     }
 
     @DBActor
-    func markProvisionalNoteWitnessed(noteId: Int64) async throws {
-        let result = zcashlc_mark_provisional_note_witnessed(
-            dbData.0,
-            dbData.1,
-            networkType.networkId,
-            noteId
-        )
+    func markProvisionalNoteWitnessed(
+        noteId: Int64,
+        siblings: Data,
+        anchorHeight: UInt64,
+        anchorRoot: Data
+    ) async throws {
+        let result = siblings.withUnsafeBytes { siblingsPtr in
+            anchorRoot.withUnsafeBytes { rootPtr in
+                zcashlc_mark_provisional_note_witnessed(
+                    dbData.0,
+                    dbData.1,
+                    networkType.networkId,
+                    noteId,
+                    siblingsPtr.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                    UInt(siblings.count),
+                    anchorHeight,
+                    rootPtr.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                    UInt(anchorRoot.count)
+                )
+            }
+        }
 
         guard result == 0 else {
             throw SpendabilityBackendError.rustError(

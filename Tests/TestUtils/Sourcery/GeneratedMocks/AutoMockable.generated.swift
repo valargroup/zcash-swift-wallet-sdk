@@ -4146,14 +4146,14 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
 
     var markProvisionalNoteWitnessedThrowableError: Error?
     var markProvisionalNoteWitnessedCallsCount = 0
-    var markProvisionalNoteWitnessedClosure: ((Int64) async throws -> Void)?
+    var markProvisionalNoteWitnessedClosure: ((Int64, Data, UInt64, Data) async throws -> Void)?
 
-    func markProvisionalNoteWitnessed(noteId: Int64) async throws {
+    func markProvisionalNoteWitnessed(noteId: Int64, siblings: Data, anchorHeight: UInt64, anchorRoot: Data) async throws {
         if let error = markProvisionalNoteWitnessedThrowableError {
             throw error
         }
         markProvisionalNoteWitnessedCallsCount += 1
-        try await markProvisionalNoteWitnessedClosure?(noteId)
+        try await markProvisionalNoteWitnessedClosure?(noteId, siblings, anchorHeight, anchorRoot)
     }
 
     // MARK: - getNotesNeedingPIRWitness

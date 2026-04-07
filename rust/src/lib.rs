@@ -4576,7 +4576,7 @@ pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
 ///
 /// Looks up the account's Orchard FVK from `spent_note_id`'s account,
 /// trial-decrypts the block's actions, and inserts each discovered note
-/// into `pir_provisional_notes`.
+/// into `pir_notes`.
 ///
 /// `depth` is the hop count from the canonical note (1 = direct change).
 /// `parent_provisional_id` is the provisional note that was spent to produce
@@ -4672,7 +4672,6 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
         for note in &discovered {
             let provisional_id = db_data.insert_pir_provisional_note(
                 account_id,
-                spent_note_id,
                 note.value,
                 note.position,
                 &note.diversifier,
@@ -4807,11 +4806,39 @@ pub unsafe extern "C" fn zcashlc_mark_provisional_note_witnessed(
     db_data_len: usize,
     network_id: u32,
     note_id: i64,
+    siblings: *const u8,
+    siblings_len: usize,
+    anchor_height: u64,
+    anchor_root: *const u8,
+    anchor_root_len: usize,
 ) -> i32 {
     let res = catch_panic(|| {
         let network = parse_network(network_id)?;
         let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
-        db_data.mark_provisional_note_witnessed(note_id)?;
+
+        let siblings_slice = unsafe { std::slice::from_raw_parts(siblings, siblings_len) };
+        if siblings_slice.len() != 1024 {
+            return Err(anyhow::anyhow!(
+                "siblings must be 1024 bytes, got {}",
+                siblings_slice.len()
+            ));
+        }
+        let mut siblings_arr = [[0u8; 32]; 32];
+        for (i, chunk) in siblings_slice.chunks_exact(32).enumerate() {
+            siblings_arr[i].copy_from_slice(chunk);
+        }
+
+        let root_slice = unsafe { std::slice::from_raw_parts(anchor_root, anchor_root_len) };
+        let root_arr: [u8; 32] = root_slice.try_into().map_err(|_| {
+            anyhow::anyhow!("anchor_root must be 32 bytes, got {}", root_slice.len())
+        })?;
+
+        db_data.mark_provisional_note_witnessed(
+            note_id,
+            &siblings_arr,
+            anchor_height,
+            &root_arr,
+        )?;
         Ok(0i32)
     });
     unwrap_exc_or(res, -1)
