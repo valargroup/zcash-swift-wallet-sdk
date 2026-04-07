@@ -94,6 +94,7 @@ use zip32::fingerprint::SeedFingerprint;
 
 mod derivation;
 mod ffi;
+mod change_discovery;
 mod spendability;
 mod tor;
 mod voting;
@@ -4562,6 +4563,81 @@ pub unsafe extern "C" fn zcashlc_get_pir_witnessed_notes(
             .collect();
 
         let json = serde_json::to_vec(&out)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
+// ---------------------------------------------------------------------------
+// Change note discovery FFI — trial-decrypt actions from a spending transaction.
+// ---------------------------------------------------------------------------
+
+/// Discovers wallet-owned change notes in a CompactBlock.
+///
+/// Given spend metadata from the nullifier PIR check, downloads the spending
+/// block and trial-decrypts its actions to find any notes owned by the wallet.
+///
+/// Returns JSON array of discovered notes:
+/// ```json
+/// [{"position":u64,"diversifier":[u8;11],"value":u64,"rseed":[u8;32],
+///   "rho":[u8;32],"nullifier":[u8;32],"cmx":[u8;32]}]
+/// ```
+///
+/// Returns null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `account_uuid_bytes` must be non-null and point to exactly 16 bytes.
+/// - `compact_block_bytes` must be non-null and valid for reads for
+///   `compact_block_bytes_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_discover_change_notes(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+    account_uuid_bytes: *const u8,
+    compact_block_bytes: *const u8,
+    compact_block_bytes_len: usize,
+    first_output_position: u32,
+    action_count: u8,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let account_uuid = account_uuid_from_bytes(account_uuid_bytes)?;
+        let block_bytes =
+            unsafe { slice::from_raw_parts(compact_block_bytes, compact_block_bytes_len) };
+
+        let account = (&db_data)
+            .get_account(account_uuid)?
+            .ok_or_else(|| anyhow!("account not found for change discovery"))?;
+
+        let ufvk = account
+            .ufvk()
+            .ok_or_else(|| anyhow!("account has no UFVK for change discovery"))?;
+
+        let orchard_fvk = ufvk
+            .orchard()
+            .ok_or_else(|| anyhow!("account has no Orchard key for change discovery"))?;
+
+        let actions = change_discovery::extract_actions_from_block(
+            block_bytes,
+            first_output_position,
+            action_count,
+        )?;
+
+        let discovered = change_discovery::discover_notes_both_scopes(orchard_fvk, &actions);
+
+        tracing::info!(
+            count = discovered.len(),
+            first_output_position,
+            action_count,
+            "change discovery: found {} notes",
+            discovered.len(),
+        );
+
+        let json = serde_json::to_vec(&discovered)?;
         Ok(ffi::BoxedSlice::some(json))
     });
     unwrap_exc_or_null(res)
