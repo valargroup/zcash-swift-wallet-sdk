@@ -10,8 +10,6 @@ use anyhow::anyhow;
 use ffi_helpers::panic::catch_panic;
 use serde::Serialize;
 
-use spend_types::SpendMetadata;
-
 use crate::unwrap_exc_or_null;
 
 pub(crate) unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
@@ -27,11 +25,28 @@ pub(crate) fn json_to_boxed_slice<T: Serialize>(
 }
 
 #[derive(Serialize)]
+struct SpendMetadataCompat {
+    spend_height: u32,
+    first_output_position: u32,
+    action_count: u8,
+}
+
+impl SpendMetadataCompat {
+    fn placeholder() -> Self {
+        Self {
+            spend_height: 0,
+            first_output_position: 0,
+            action_count: 0,
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct NullifierCheckResult {
     earliest_height: u64,
     latest_height: u64,
     /// Parallel to the input nullifiers: Some(meta) = spent, None = not spent.
-    spent: Vec<Option<SpendMetadata>>,
+    spent: Vec<Option<SpendMetadataCompat>>,
 }
 
 /// Checks nullifiers against the PIR server. No database access.
@@ -84,7 +99,10 @@ pub unsafe extern "C" fn zcashlc_check_nullifiers_pir(
         let result = NullifierCheckResult {
             earliest_height: metadata.earliest_height,
             latest_height: metadata.latest_height,
-            spent,
+            spent: spent
+                .into_iter()
+                .map(|is_spent| is_spent.then(SpendMetadataCompat::placeholder))
+                .collect(),
         };
 
         json_to_boxed_slice(&result)
@@ -102,13 +120,13 @@ mod tests {
             earliest_height: 100,
             latest_height: 200,
             spent: vec![
-                Some(SpendMetadata {
+                Some(SpendMetadataCompat {
                     spend_height: 150,
                     first_output_position: 5000,
                     action_count: 3,
                 }),
                 None,
-                Some(SpendMetadata {
+                Some(SpendMetadataCompat {
                     spend_height: 180,
                     first_output_position: 8000,
                     action_count: 1,

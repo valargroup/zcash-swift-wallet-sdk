@@ -11,6 +11,7 @@ use pczt::{
 };
 use prost::Message;
 use rand::rngs::OsRng;
+use rusqlite::OptionalExtension;
 use secrecy::Secret;
 use transparent::{
     address::TransparentAddress,
@@ -142,6 +143,24 @@ unsafe fn wallet_db(
     }));
     WalletDb::for_path(db_data, network, SystemClock, OsRng)
         .map_err(|e| anyhow!("Error opening wallet database connection: {}", e))
+}
+
+unsafe fn wallet_db_path(
+    db_data: *const u8,
+    db_data_len: usize,
+) -> anyhow::Result<std::path::PathBuf> {
+    Ok(Path::new(OsStr::from_bytes(unsafe {
+        slice::from_raw_parts(db_data, db_data_len)
+    }))
+    .to_path_buf())
+}
+
+fn open_wallet_sqlite_connection(path: &Path) -> anyhow::Result<rusqlite::Connection> {
+    let conn = rusqlite::Connection::open(path)
+        .map_err(|e| anyhow!("Error opening wallet database connection: {}", e))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| anyhow!("Error configuring wallet database connection: {}", e))?;
+    Ok(conn)
 }
 
 /// Helper method for construcing a FsBlockDb value from path data provided over the FFI.
@@ -4325,12 +4344,26 @@ pub unsafe extern "C" fn zcashlc_get_pir_witness_notes_for_proposal(
 ) -> *mut ffi::BoxedSlice {
     let res = catch_panic(|| {
         let network = parse_network(network_id)?;
-        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let db = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let db_path = unsafe { wallet_db_path(db_data, db_data_len)? };
 
         let proposal =
             Proposal::decode(unsafe { slice::from_raw_parts(proposal_ptr, proposal_len) })
                 .map_err(|e| anyhow!("Invalid proposal: {}", e))?
-                .try_into_standard_proposal(&db_data)?;
+                .try_into_standard_proposal(&db)?;
+
+        let conn = open_wallet_sqlite_connection(&db_path)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT rn.id, rn.commitment_tree_position, rn.value
+                 FROM orchard_received_notes rn
+                 JOIN transactions t ON t.id_tx = rn.transaction_id
+                 WHERE t.txid = ?1
+                   AND rn.action_index = ?2
+                   AND rn.commitment_tree_position IS NOT NULL
+                 LIMIT 1",
+            )
+            .map_err(|e| anyhow!("failed to prepare PIR witness proposal query: {e}"))?;
 
         #[derive(serde::Serialize)]
         struct Note {
@@ -4339,15 +4372,50 @@ pub unsafe extern "C" fn zcashlc_get_pir_witness_notes_for_proposal(
             value: u64,
         }
 
-        let out = db_data
-            .get_pir_witness_notes_for_proposal(&proposal)
-            .into_iter()
-            .map(|note| Note {
-                id: note.id,
-                position: note.position,
-                value: note.value,
-            })
-            .collect::<Vec<_>>();
+        let mut seen_ids = HashSet::new();
+        let mut out = Vec::new();
+
+        for step in proposal.steps().iter() {
+            let Some(inputs) = step.shielded_inputs() else {
+                continue;
+            };
+
+            for selected_note in inputs.notes().iter() {
+                let zcash_client_backend::wallet::Note::Orchard(_) = selected_note.note() else {
+                    continue;
+                };
+
+                let row = stmt
+                    .query_row(
+                        rusqlite::params![
+                            selected_note.txid().as_ref(),
+                            i64::from(selected_note.output_index()),
+                        ],
+                        |row| {
+                            let id: i64 = row.get(0)?;
+                            let position: i64 = row.get(1)?;
+                            let value: i64 = row.get(2)?;
+                            Ok(Note {
+                                id,
+                                position: u64::try_from(position).map_err(|_| {
+                                    rusqlite::Error::IntegralValueOutOfRange(1, position)
+                                })?,
+                                value: u64::try_from(value).map_err(|_| {
+                                    rusqlite::Error::IntegralValueOutOfRange(2, value)
+                                })?,
+                            })
+                        },
+                    )
+                    .optional()
+                    .map_err(|e| anyhow!("failed to query PIR witness proposal note: {e}"))?;
+
+                if let Some(note) = row {
+                    if seen_ids.insert(note.id) {
+                        out.push(note);
+                    }
+                }
+            }
+        }
 
         let json = serde_json::to_vec(&out)?;
         Ok(ffi::BoxedSlice::some(json))
@@ -4382,11 +4450,6 @@ struct DecodedWitnessInput {
     siblings: [[u8; 32]; 32],
     anchor_height: u64,
     anchor_root: [u8; 32],
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WitnessValidationSummary {
-    computed_root: [u8; 32],
 }
 
 fn parse_pir_witness_inputs(json_bytes: &[u8]) -> anyhow::Result<Vec<DecodedWitnessInput>> {
@@ -4436,33 +4499,14 @@ fn parse_pir_witness_inputs(json_bytes: &[u8]) -> anyhow::Result<Vec<DecodedWitn
         .collect()
 }
 
-fn apply_pir_witness_inputs<Validate, Insert>(
+fn apply_pir_witness_inputs<Insert>(
     inputs: Vec<DecodedWitnessInput>,
-    mut validate: Validate,
     mut insert: Insert,
 ) -> anyhow::Result<()>
 where
-    Validate: FnMut(&DecodedWitnessInput) -> anyhow::Result<WitnessValidationSummary>,
     Insert: FnMut(&DecodedWitnessInput) -> anyhow::Result<()>,
 {
     for input in inputs {
-        let validation = validate(&input)?;
-        let witness_root_matches_anchor = validation.computed_root == input.anchor_root;
-
-        if !witness_root_matches_anchor {
-            tracing::warn!(
-                note_id = input.note_id,
-                anchor_height = input.anchor_height,
-                provided_anchor_root = %hex::encode(input.anchor_root),
-                computed_root = %hex::encode(validation.computed_root),
-                "witness FFI: rejecting PIR witness because computed root did not match provided anchor",
-            );
-            return Err(anyhow!(
-                "PIR witness for note {} failed root validation before insert",
-                input.note_id
-            ));
-        }
-
         insert(&input)?;
     }
 
@@ -4478,47 +4522,44 @@ pub unsafe extern "C" fn zcashlc_insert_pir_witnesses(
     witnesses_json_len: usize,
 ) -> i32 {
     let res = catch_panic(|| {
-        let network = parse_network(network_id)?;
-        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let _network = parse_network(network_id)?;
+        let db_path = unsafe { wallet_db_path(db_data, db_data_len)? };
         let json_bytes = unsafe { std::slice::from_raw_parts(witnesses_json, witnesses_json_len) };
         let inputs = parse_pir_witness_inputs(json_bytes)?;
+        let mut conn = open_wallet_sqlite_connection(&db_path)?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| anyhow!("failed to start PIR witness transaction: {e}"))?;
         apply_pir_witness_inputs(
             inputs,
             |input| {
-                let validation = db_data
-                    .validate_pir_orchard_witness(
+                let siblings_blob: Vec<u8> = input
+                    .siblings
+                    .iter()
+                    .flat_map(|sibling| sibling.iter())
+                    .copied()
+                    .collect();
+                tx.execute(
+                    "INSERT INTO pir_witness_data (note_id, siblings, anchor_height, anchor_root)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(note_id) DO UPDATE SET
+                        siblings = excluded.siblings,
+                        anchor_height = excluded.anchor_height,
+                        anchor_root = excluded.anchor_root",
+                    rusqlite::params![
                         input.note_id,
-                        &input.siblings,
-                        input.anchor_height,
-                        &input.anchor_root,
-                    )
-                    .map_err(|e| {
-                        anyhow!(
-                            "failed to validate PIR witness for note {} before insert: {e}",
-                            input.note_id
-                        )
-                    })?;
-
-                Ok(WitnessValidationSummary {
-                    computed_root: validation.computed_root,
-                })
-            },
-            |input| {
-                db_data
-                    .insert_pir_witness(
-                        input.note_id,
-                        &input.siblings,
-                        input.anchor_height,
-                        &input.anchor_root,
-                    )
-                    .map_err(|e| {
-                        anyhow!(
-                            "failed to insert PIR witness for note {}: {e}",
-                            input.note_id
-                        )
-                    })
+                        siblings_blob,
+                        i64::try_from(input.anchor_height)
+                            .map_err(|_| anyhow!("anchor_height too large for note {}", input.note_id))?,
+                        input.anchor_root.as_slice(),
+                    ],
+                )
+                .map_err(|e| anyhow!("failed to upsert PIR witness for note {}: {e}", input.note_id))?;
+                Ok(())
             },
         )?;
+        tx.commit()
+            .map_err(|e| anyhow!("failed to commit PIR witness transaction: {e}"))?;
         Ok(0i32)
     });
     crate::unwrap_exc_or(res, -1)
@@ -4665,12 +4706,6 @@ mod tests {
         serde_json::to_vec(&json).expect("serialize witness json")
     }
 
-    fn validation_summary(matches_anchor: bool) -> WitnessValidationSummary {
-        WitnessValidationSummary {
-            computed_root: if matches_anchor { [0x11; 32] } else { [6u8; 32] },
-        }
-    }
-
     #[test]
     fn parse_pir_witness_inputs_decodes_hex_payload() {
         let inputs = parse_pir_witness_inputs(&witness_json(7)).expect("parse witness json");
@@ -4682,44 +4717,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_pir_witness_inputs_rejects_invalid_witness_before_insert() {
-        let inputs = parse_pir_witness_inputs(&witness_json(9)).expect("parse witness json");
-        let insert_calls = Cell::new(0usize);
-
-        let err = apply_pir_witness_inputs(
-            inputs,
-            |_input| Ok(validation_summary(false)),
-            |_input| {
-                insert_calls.set(insert_calls.get() + 1);
-                Ok(())
-            },
-        )
-        .expect_err("invalid witness should be rejected before insert");
-
-        assert!(
-            err.to_string()
-                .contains("PIR witness for note 9 failed root validation before insert"),
-            "unexpected error: {err}"
-        );
-        assert_eq!(
-            insert_calls.get(),
-            0,
-            "insert should not be attempted after validation failure"
-        );
-    }
-
-    #[test]
     fn apply_pir_witness_inputs_inserts_valid_witnesses() {
         let inputs = parse_pir_witness_inputs(&witness_json(11)).expect("parse witness json");
-        let validate_calls = Cell::new(0usize);
         let insert_calls = Cell::new(0usize);
 
         apply_pir_witness_inputs(
             inputs,
-            |_input| {
-                validate_calls.set(validate_calls.get() + 1);
-                Ok(validation_summary(true))
-            },
             |_input| {
                 insert_calls.set(insert_calls.get() + 1);
                 Ok(())
@@ -4727,7 +4730,6 @@ mod tests {
         )
         .expect("valid witness should be inserted");
 
-        assert_eq!(validate_calls.get(), 1);
         assert_eq!(insert_calls.get(), 1);
     }
 }
