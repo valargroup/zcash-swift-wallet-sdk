@@ -173,7 +173,8 @@ final class PIRWitnessRetryOfflineTests: ZcashTestCase {
         )
 
         var iterator = stream.makeAsyncIterator()
-        XCTAssertNil(try await iterator.next())
+        let next = try await iterator.next()
+        XCTAssertNil(next)
         XCTAssertEqual(transactionEncoder.createProposedTransactionsCallsCount, 2)
         XCTAssertEqual(rustBackend.getPIRWitnessNotesCallsCount, 1)
         XCTAssertEqual(rustBackend.insertPIRWitnessesCallsCount, 1)
