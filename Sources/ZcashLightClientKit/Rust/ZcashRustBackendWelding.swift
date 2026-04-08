@@ -400,8 +400,8 @@ protocol ZcashRustBackendWelding {
     /// Inserts PIR-detected spent note IDs into the wallet DB.
     func insertPIRSpentNotes(_ noteIds: [Int64]) async throws
 
-    /// Returns PIR-detected spent notes not yet confirmed by the block scanner.
-    func getPIRPendingSpends() async throws -> PIRPendingSpends
+    /// Returns PIR-derived transaction entries for the activity view.
+    func getPIRActivityEntries() async throws -> [PIRActivityEntry]
 
     // MARK: - Change discovery (serialized through @DBActor)
 

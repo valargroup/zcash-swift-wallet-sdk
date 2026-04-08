@@ -93,40 +93,6 @@ public struct PIRNullifierCheckResult: Codable, Sendable, Equatable {
     }
 }
 
-// MARK: - Pending spends (PIR-detected but not yet confirmed by scanning)
-
-/// A single note detected as spent by PIR that scanning has not yet confirmed.
-public struct PIRPendingNote: Codable, Sendable, Equatable {
-    public let noteId: Int64
-    public let value: UInt64
-
-    enum CodingKeys: String, CodingKey {
-        case noteId = "note_id"
-        case value
-    }
-
-    public init(noteId: Int64, value: UInt64) {
-        self.noteId = noteId
-        self.value = value
-    }
-}
-
-/// Aggregated result of PIR-detected spends not yet confirmed by scanning.
-public struct PIRPendingSpends: Codable, Sendable, Equatable {
-    public let notes: [PIRPendingNote]
-    public let totalValue: UInt64
-
-    enum CodingKeys: String, CodingKey {
-        case notes
-        case totalValue = "total_value"
-    }
-
-    public init(notes: [PIRPendingNote], totalValue: UInt64) {
-        self.notes = notes
-        self.totalValue = totalValue
-    }
-}
-
 // MARK: - Discovered change note
 
 /// A change note discovered via PIR trial decryption and stored as a provisional
@@ -195,6 +161,68 @@ public struct PIRProvisionalResult: Codable, Sendable, Equatable {
     public init(id: Int64, spent: Bool) {
         self.id = id
         self.spent = spent
+    }
+}
+
+// MARK: - Activity entry (PIR-derived transaction)
+
+/// A PIR-derived transaction entry for the activity view. Represents a spending
+/// transaction detected via PIR that the scanner has not yet confirmed.
+public struct PIRActivityEntry: Codable, Sendable, Equatable {
+    /// Hex-encoded 32-byte txid of the spending transaction.
+    public let txHash: String
+    /// Net amount sent (gross - change) in zatoshis.
+    public let netValue: UInt64
+    /// Total value of spent input notes in zatoshis.
+    public let grossValue: UInt64
+    /// Total value of change returned in zatoshis.
+    public let changeValue: UInt64
+    /// Fee in zatoshis, if available.
+    public let fee: UInt64?
+    /// Block height of the spending transaction.
+    public let height: UInt32
+    /// Unix timestamp of the block.
+    public let blockTime: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case txHash = "tx_hash"
+        case netValue = "net_value"
+        case grossValue = "gross_value"
+        case changeValue = "change_value"
+        case fee
+        case height
+        case blockTime = "block_time"
+    }
+
+    /// The raw transaction ID bytes (32 bytes), decoded from the hex string.
+    public var rawID: Data {
+        let chars = Array(txHash)
+        let byteCount = chars.count / 2
+        var data = Data(capacity: byteCount)
+        for i in stride(from: 0, to: chars.count - 1, by: 2) {
+            if let byte = UInt8(String(chars[i...i+1]), radix: 16) {
+                data.append(byte)
+            }
+        }
+        return data
+    }
+
+    public init(
+        txHash: String,
+        netValue: UInt64,
+        grossValue: UInt64,
+        changeValue: UInt64,
+        fee: UInt64?,
+        height: UInt32,
+        blockTime: UInt32
+    ) {
+        self.txHash = txHash
+        self.netValue = netValue
+        self.grossValue = grossValue
+        self.changeValue = changeValue
+        self.fee = fee
+        self.height = height
+        self.blockTime = blockTime
     }
 }
 

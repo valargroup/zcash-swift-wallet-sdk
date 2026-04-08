@@ -4207,16 +4207,20 @@ pub unsafe extern "C" fn zcashlc_insert_pir_spent_notes(
     unwrap_exc_or(res, -1)
 }
 
-/// Returns PIR-detected spent notes not yet confirmed by the block scanner.
+/// Returns PIR-derived transaction entries for the activity view.
 ///
-/// Uses `wallet_db()` so it shares the `@DBActor`-serialized connection.
-/// Returns JSON `PIRPendingSpendsResult`, or null on error.
+/// Each entry represents a spending transaction detected via PIR that the
+/// scanner has not yet confirmed. Returns JSON array:
+/// ```json
+/// [{"tx_hash":"hex","net_value":u64,"gross_value":u64,"change_value":u64,
+///   "fee":u64|null,"height":u32,"block_time":u32}, ...]
+/// ```
 ///
 /// # Safety
 ///
 /// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zcashlc_get_pir_pending_spends_v2(
+pub unsafe extern "C" fn zcashlc_get_pir_activity_entries(
     db_data: *const u8,
     db_data_len: usize,
     network_id: u32,
@@ -4225,32 +4229,33 @@ pub unsafe extern "C" fn zcashlc_get_pir_pending_spends_v2(
         let network = parse_network(network_id)?;
         let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
 
-        let pir_result = db_data
-            .get_pir_pending_spends()
-            .map_err(|e| anyhow!("failed to query PIR pending spends: {e}"))?;
+        let entries = db_data
+            .get_pir_activity_entries()
+            .map_err(|e| anyhow!("failed to query PIR activity entries: {e}"))?;
 
         #[derive(serde::Serialize)]
-        struct PendingNote {
-            note_id: i64,
-            value: u64,
-        }
-        #[derive(serde::Serialize)]
-        struct PendingResult {
-            notes: Vec<PendingNote>,
-            total_value: u64,
+        struct ActivityEntry {
+            tx_hash: String,
+            net_value: u64,
+            gross_value: u64,
+            change_value: u64,
+            fee: Option<u64>,
+            height: u32,
+            block_time: u32,
         }
 
-        let result = PendingResult {
-            notes: pir_result
-                .notes
-                .into_iter()
-                .map(|n| PendingNote {
-                    note_id: n.note_id,
-                    value: n.value,
-                })
-                .collect(),
-            total_value: pir_result.total_value,
-        };
+        let result: Vec<ActivityEntry> = entries
+            .into_iter()
+            .map(|e| ActivityEntry {
+                tx_hash: hex::encode(e.tx_hash),
+                net_value: e.net_value(),
+                gross_value: e.gross_value,
+                change_value: e.change_value,
+                fee: e.fee,
+                height: e.height,
+                block_time: e.block_time,
+            })
+            .collect();
 
         let json = serde_json::to_vec(&result)?;
         Ok(ffi::BoxedSlice::some(json))
@@ -4686,13 +4691,13 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
             .orchard()
             .ok_or_else(|| anyhow!("account has no Orchard key for change discovery"))?;
 
-        let actions = change_discovery::extract_actions_from_block(
+        let extracted = change_discovery::extract_actions_from_block(
             block_bytes,
             first_output_position,
             action_count,
         )?;
 
-        let discovered = change_discovery::discover_notes_both_scopes(orchard_fvk, &actions);
+        let discovered = change_discovery::discover_notes_both_scopes(orchard_fvk, &extracted.actions);
 
         tracing::info!(
             count = discovered.len(),
@@ -4703,6 +4708,22 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
             discovered.len(),
             depth,
         );
+
+        if let Some(ref meta) = extracted.metadata {
+            let parent_pir_id = match parent_prov {
+                Some(prov_id) => Some(prov_id),
+                None => db_data.get_pir_note_id_for_canonical(spent_note_id)?,
+            };
+            if let Some(pir_id) = parent_pir_id {
+                db_data.set_pir_spending_tx_metadata(
+                    pir_id,
+                    &meta.tx_hash,
+                    meta.block_time,
+                    if meta.fee > 0 { Some(meta.fee) } else { None },
+                    Some(spend_height),
+                )?;
+            }
+        }
 
         #[derive(serde::Serialize)]
         struct DiscoveredNoteResult {

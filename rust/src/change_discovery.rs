@@ -80,11 +80,31 @@ pub(crate) fn discover_notes_both_scopes(
     all_discovered
 }
 
+/// Metadata about the spending transaction and block, extracted alongside compact actions.
+#[derive(Debug, Clone)]
+pub(crate) struct BlockTxMetadata {
+    /// The 32-byte txid from CompactTx.hash.
+    pub tx_hash: [u8; 32],
+    /// The fee from CompactTx.fee (0 if unavailable).
+    pub fee: u64,
+    /// Unix epoch timestamp from CompactBlock.time.
+    pub block_time: u32,
+}
+
+/// Result of extracting actions from a compact block: the actions themselves
+/// plus metadata about the containing transaction and block.
+#[derive(Debug)]
+pub(crate) struct ExtractedActions {
+    pub actions: Vec<(u64, CompactAction)>,
+    pub metadata: Option<BlockTxMetadata>,
+}
+
 /// Extracts compact actions at specific tree positions from a serialized CompactBlock.
 ///
 /// Given `first_output_position` and `action_count` (from [`SpendMetadata`]),
 /// decodes the block, computes each action's global tree position, and returns
-/// the actions in `[first_output_position, first_output_position + action_count)`.
+/// the actions in `[first_output_position, first_output_position + action_count)`
+/// along with the spending transaction's metadata (txid, fee, block time).
 ///
 /// This is the v1 data source (RPC block download). It will be replaced by
 /// decryption PIR in v2.
@@ -92,13 +112,18 @@ pub(crate) fn extract_actions_from_block(
     block_bytes: &[u8],
     first_output_position: u32,
     action_count: u8,
-) -> anyhow::Result<Vec<(u64, CompactAction)>> {
+) -> anyhow::Result<ExtractedActions> {
     if action_count == 0 {
-        return Ok(Vec::new());
+        return Ok(ExtractedActions {
+            actions: Vec::new(),
+            metadata: None,
+        });
     }
 
     let block = CompactBlock::decode(block_bytes)
         .map_err(|e| anyhow!("failed to decode CompactBlock: {e}"))?;
+
+    let block_time = block.time;
 
     let chain_meta = block
         .chain_metadata
@@ -139,19 +164,36 @@ pub(crate) fn extract_actions_from_block(
 
     let mut result = Vec::with_capacity(action_count as usize);
     let mut current_position = tree_size_at_block_start;
+    let mut matched_tx_meta: Option<BlockTxMetadata> = None;
 
     for tx in &block.vtx {
+        let tx_start_pos = current_position;
+        let tx_end_pos = tx_start_pos + tx.actions.len() as u32;
+
         for proto_action in &tx.actions {
             if current_position >= first_pos && current_position < last_pos {
                 let compact_action = CompactAction::try_from(proto_action).map_err(|_| {
                     anyhow!("invalid CompactOrchardAction at position {current_position}")
                 })?;
                 result.push((u64::from(current_position), compact_action));
+
+                if matched_tx_meta.is_none() && first_pos >= tx_start_pos && first_pos < tx_end_pos {
+                    if let Ok(tx_hash) = <[u8; 32]>::try_from(tx.hash.as_slice()) {
+                        matched_tx_meta = Some(BlockTxMetadata {
+                            tx_hash,
+                            fee: u64::from(tx.fee),
+                            block_time,
+                        });
+                    }
+                }
             }
             current_position += 1;
 
             if result.len() == action_count as usize {
-                return Ok(result);
+                return Ok(ExtractedActions {
+                    actions: result,
+                    metadata: matched_tx_meta,
+                });
             }
         }
     }
@@ -164,7 +206,10 @@ pub(crate) fn extract_actions_from_block(
         ));
     }
 
-    Ok(result)
+    Ok(ExtractedActions {
+        actions: result,
+        metadata: matched_tx_meta,
+    })
 }
 
 #[cfg(test)]
@@ -186,6 +231,7 @@ mod tests {
         let mut block = CompactBlock {
             proto_version: 1,
             height: 100,
+            time: 1_700_000_000,
             chain_metadata: Some(ChainMetadata {
                 orchard_commitment_tree_size: tree_size_before_block + total_actions,
                 ..Default::default()
@@ -194,8 +240,13 @@ mod tests {
         };
 
         for tx_idx in 0..num_txs {
+            let mut tx_hash = [0u8; 32];
+            tx_hash[0] = 0xAA;
+            tx_hash[1] = tx_idx as u8;
             let mut tx = CompactTx {
                 index: tx_idx as u64,
+                hash: tx_hash.to_vec(),
+                fee: 10_000,
                 ..Default::default()
             };
             for action_idx in 0..actions_per_tx {
@@ -227,36 +278,45 @@ mod tests {
     #[test]
     fn extract_single_action() {
         let block_bytes = make_test_block(1, 3, 1000);
-        let actions = extract_actions_from_block(&block_bytes, 1001, 1).unwrap();
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].0, 1001);
+        let extracted = extract_actions_from_block(&block_bytes, 1001, 1).unwrap();
+        assert_eq!(extracted.actions.len(), 1);
+        assert_eq!(extracted.actions[0].0, 1001);
+
+        let meta = extracted.metadata.expect("metadata should be present");
+        assert_eq!(meta.block_time, 1_700_000_000);
+        assert_eq!(meta.fee, 10_000);
+        assert_eq!(meta.tx_hash[0], 0xAA);
+        assert_eq!(meta.tx_hash[1], 0x00);
     }
 
     #[test]
     fn extract_multiple_actions() {
         let block_bytes = make_test_block(2, 4, 500);
-        let actions = extract_actions_from_block(&block_bytes, 502, 3).unwrap();
-        assert_eq!(actions.len(), 3);
-        assert_eq!(actions[0].0, 502);
-        assert_eq!(actions[1].0, 503);
-        assert_eq!(actions[2].0, 504);
+        let extracted = extract_actions_from_block(&block_bytes, 502, 3).unwrap();
+        assert_eq!(extracted.actions.len(), 3);
+        assert_eq!(extracted.actions[0].0, 502);
+        assert_eq!(extracted.actions[1].0, 503);
+        assert_eq!(extracted.actions[2].0, 504);
     }
 
     #[test]
     fn extract_spanning_transactions() {
         let block_bytes = make_test_block(2, 2, 0);
-        let actions = extract_actions_from_block(&block_bytes, 1, 2).unwrap();
-        assert_eq!(actions.len(), 2);
-        assert_eq!(actions[0].0, 1);
-        assert_eq!(actions[1].0, 2);
+        let extracted = extract_actions_from_block(&block_bytes, 1, 2).unwrap();
+        assert_eq!(extracted.actions.len(), 2);
+        assert_eq!(extracted.actions[0].0, 1);
+        assert_eq!(extracted.actions[1].0, 2);
+
+        let meta = extracted.metadata.expect("metadata should be present");
+        assert_eq!(meta.tx_hash[1], 0x00, "metadata should come from the first tx containing the range start");
     }
 
     #[test]
     fn extract_all_actions_in_block() {
         let block_bytes = make_test_block(1, 5, 100);
-        let actions = extract_actions_from_block(&block_bytes, 100, 5).unwrap();
-        assert_eq!(actions.len(), 5);
-        for (i, (pos, _)) in actions.iter().enumerate() {
+        let extracted = extract_actions_from_block(&block_bytes, 100, 5).unwrap();
+        assert_eq!(extracted.actions.len(), 5);
+        for (i, (pos, _)) in extracted.actions.iter().enumerate() {
             assert_eq!(*pos, 100 + i as u64);
         }
     }
@@ -276,8 +336,9 @@ mod tests {
     #[test]
     fn extract_zero_actions() {
         let block_bytes = make_test_block(1, 3, 100);
-        let actions = extract_actions_from_block(&block_bytes, 100, 0).unwrap();
-        assert!(actions.is_empty());
+        let extracted = extract_actions_from_block(&block_bytes, 100, 0).unwrap();
+        assert!(extracted.actions.is_empty());
+        assert!(extracted.metadata.is_none());
     }
 
     #[test]
@@ -289,6 +350,42 @@ mod tests {
             ..Default::default()
         };
         assert!(extract_actions_from_block(&block.encode_to_vec(), 0, 1).is_err());
+    }
+
+    #[test]
+    fn extract_captures_tx_metadata() {
+        let mut block = CompactBlock {
+            proto_version: 1,
+            height: 100,
+            time: 1700000000,
+            chain_metadata: Some(ChainMetadata {
+                orchard_commitment_tree_size: 1003,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut tx = CompactTx {
+            index: 0,
+            hash: vec![0xAB; 32],
+            fee: 10_000,
+            ..Default::default()
+        };
+        for i in 0..3u8 {
+            tx.actions.push(CompactOrchardAction {
+                nullifier: [i; 32].to_vec(),
+                cmx: [i; 32].to_vec(),
+                ephemeral_key: [i; 32].to_vec(),
+                ciphertext: vec![0u8; 52],
+            });
+        }
+        block.vtx.push(tx);
+        let block_bytes = block.encode_to_vec();
+
+        let extracted = extract_actions_from_block(&block_bytes, 1001, 1).unwrap();
+        let meta = extracted.metadata.unwrap();
+        assert_eq!(meta.tx_hash, [0xAB; 32]);
+        assert_eq!(meta.fee, 10_000);
+        assert_eq!(meta.block_time, 1700000000);
     }
 
     // -- Trial decryption tests --
@@ -442,16 +539,16 @@ mod tests {
 
         let block_bytes = block.encode_to_vec();
 
-        let actions = extract_actions_from_block(
+        let extracted = extract_actions_from_block(
             &block_bytes,
             target_position,
             1,
         )
         .unwrap();
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].0, target_position as u64);
+        assert_eq!(extracted.actions.len(), 1);
+        assert_eq!(extracted.actions[0].0, target_position as u64);
 
-        let discovered = discover_notes_both_scopes(&fvk, &actions);
+        let discovered = discover_notes_both_scopes(&fvk, &extracted.actions);
         assert_eq!(discovered.len(), 1);
 
         let note = &discovered[0];

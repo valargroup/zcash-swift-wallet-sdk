@@ -1327,8 +1327,8 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
     }
 
     @DBActor
-    func getPIRPendingSpends() async throws -> PIRPendingSpends {
-        let ptr = zcashlc_get_pir_pending_spends_v2(
+    func getPIRActivityEntries() async throws -> [PIRActivityEntry] {
+        let ptr = zcashlc_get_pir_activity_entries(
             dbData.0,
             dbData.1,
             networkType.networkId
@@ -1336,13 +1336,13 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
 
         guard let ptr else {
             throw SpendabilityBackendError.rustError(
-                lastErrorMessage(fallback: "`getPIRPendingSpends` failed")
+                lastErrorMessage(fallback: "`getPIRActivityEntries` failed")
             )
         }
         defer { zcashlc_free_boxed_slice(ptr) }
 
         let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
-        return try JSONDecoder().decode(PIRPendingSpends.self, from: data)
+        return try JSONDecoder().decode([PIRActivityEntry].self, from: data)
     }
 
     // MARK: - Change discovery

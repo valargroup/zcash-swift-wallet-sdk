@@ -541,9 +541,10 @@ public protocol Synchronizer: AnyObject {
         maxDepth: Int
     ) async throws -> SpendabilityResult
 
-    /// Return PIR-detected spent notes whose spends have not yet been confirmed
-    /// by the block scanner. Queries the wallet DB read-only.
-    func getPIRPendingSpends() async throws -> PIRPendingSpends
+    /// Returns PIR-derived transaction entries for the activity view.
+    /// Each entry is a spending transaction detected via PIR that the scanner
+    /// has not yet confirmed.
+    func getPIRActivityEntries() async throws -> [PIRActivityEntry]
 
     /// Fetch note commitment witnesses from the PIR server for notes discovered
     /// during sync whose shards are not yet fully scanned.

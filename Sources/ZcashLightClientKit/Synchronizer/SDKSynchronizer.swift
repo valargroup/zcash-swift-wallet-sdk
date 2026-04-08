@@ -1264,8 +1264,8 @@ public class SDKSynchronizer: Synchronizer {
         }
     }
 
-    public func getPIRPendingSpends() async throws -> PIRPendingSpends {
-        try await initializer.rustBackend.getPIRPendingSpends()
+    public func getPIRActivityEntries() async throws -> [PIRActivityEntry] {
+        try await initializer.rustBackend.getPIRActivityEntries()
     }
 
     public func fetchNoteWitnesses(
