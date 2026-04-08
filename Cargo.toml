@@ -100,11 +100,11 @@ crate-type = ["staticlib"]
 lto = true
 
 [patch.crates-io]
-zcash_address        = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-zcash_primitives     = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-zcash_proofs         = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-zcash_protocol       = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-zcash_transparent    = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
-pczt                 = { git = "https://github.com/valargroup/librustzcash.git", rev = "a90d53b52c317a9693a46f5cb09e7032425a4f13" }
+zcash_address        = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+zcash_primitives     = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+zcash_proofs         = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+zcash_protocol       = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+zcash_transparent    = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
+pczt                 = { git = "https://github.com/valargroup/librustzcash.git", rev = "2d51dfaad09ac5ec3cc7b6705e740c08d4b79036" }
