@@ -200,7 +200,7 @@ public struct PIRActivityEntry: Codable, Sendable, Equatable {
         let byteCount = chars.count / 2
         var data = Data(capacity: byteCount)
         for i in stride(from: 0, to: chars.count - 1, by: 2) {
-            if let byte = UInt8(String(chars[i...i+1]), radix: 16) {
+            if let byte = UInt8(String(chars[i...i + 1]), radix: 16) {
                 data.append(byte)
             }
         }

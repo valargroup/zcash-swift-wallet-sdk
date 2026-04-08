@@ -412,6 +412,7 @@ protocol ZcashRustBackendWelding {
     ///   - depth: Hop count from the canonical note (1 = direct change).
     ///   - parentProvisionalId: ID of the provisional note that was spent to produce
     ///     these change notes, or `nil` for depth-1 notes whose parent is canonical.
+    // swiftlint:disable:next function_parameter_count
     func discoverChangeNotes(
         spentNoteId: Int64,
         compactBlockBytes: Data,

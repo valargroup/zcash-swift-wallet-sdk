@@ -10,7 +10,8 @@ import Foundation
 import Combine
 
 /// Synchronizer implementation for UIKit and iOS 13+
-// swiftlint:disable type_body_length file_length
+// swiftlint:disable type_body_length
+// swiftlint:disable file_length
 public class SDKSynchronizer: Synchronizer {
     private enum Constants {
         static let fixWitnessesLastVersionCall = "ud_fixWitnessesLastVersionCall"
@@ -251,7 +252,7 @@ public class SDKSynchronizer: Synchronizer {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         let lastVersionCall = UserDefaults.standard.string(forKey: Constants.fixWitnessesLastVersionCall)
         
-        guard lastVersionCall == nil || lastVersionCall! < appVersion else { return }
+        guard lastVersionCall.map({ $0 < appVersion }) ?? true else { return }
         
         UserDefaults.standard.set(appVersion, forKey: Constants.fixWitnessesLastVersionCall)
         await initializer.rustBackend.fixWitnesses()
@@ -1227,6 +1228,7 @@ public class SDKSynchronizer: Synchronizer {
 
     /// Fetches a compact block and trial-decrypts it to discover change notes
     /// at a given depth in the spend chain.
+    // swiftlint:disable:next function_parameter_count
     private func discoverChangeAtDepth(
         service: LightWalletService,
         mode: ServiceMode,
@@ -1341,23 +1343,23 @@ public class SDKSynchronizer: Synchronizer {
     private static func decodeHex(_ hex: String) -> Data {
         let chars = Array(hex.utf8)
         var data = Data(capacity: chars.count / 2)
-        var i = 0
-        while i + 1 < chars.count {
-            guard let hi = hexVal(chars[i]), let lo = hexVal(chars[i + 1]) else {
-                i += 2
+        var idx = 0
+        while idx + 1 < chars.count {
+            guard let high = hexVal(chars[idx]), let low = hexVal(chars[idx + 1]) else {
+                idx += 2
                 continue
             }
-            data.append(hi << 4 | lo)
-            i += 2
+            data.append(high << 4 | low)
+            idx += 2
         }
         return data
     }
 
-    private static func hexVal(_ c: UInt8) -> UInt8? {
-        switch c {
-        case 0x30...0x39: return c - 0x30        // 0-9
-        case 0x41...0x46: return c - 0x41 + 10   // A-F
-        case 0x61...0x66: return c - 0x61 + 10   // a-f
+    private static func hexVal(_ char: UInt8) -> UInt8? {
+        switch char {
+        case 0x30...0x39: return char - 0x30        // 0-9
+        case 0x41...0x46: return char - 0x41 + 10   // A-F
+        case 0x61...0x66: return char - 0x61 + 10   // a-f
         default: return nil
         }
     }
@@ -1646,3 +1648,5 @@ extension SessionTicker {
         }
     }
 }
+// swiftlint:enable type_body_length
+// swiftlint:enable file_length

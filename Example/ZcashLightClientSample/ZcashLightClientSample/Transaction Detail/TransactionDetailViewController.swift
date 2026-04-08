@@ -176,3 +176,4 @@ class TransactionDetailViewController: UITableViewController {
         return String(height)
     }
 }
+// swiftlint:enable implicitly_unwrapped_optional

@@ -5,7 +5,7 @@
 //  Created by Jack Grigg on 5/8/19.
 //  Copyright © 2019 Electric Coin Company. All rights reserved.
 //
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 import Foundation
 import libzcashlc
 
@@ -67,8 +67,8 @@ public struct ConfirmationsPolicy {
 }
 
 struct ZcashRustBackend: ZcashRustBackendWelding {
-    let confirmationsPolicy: ConfirmationsPolicy = ConfirmationsPolicy.defaultTransferPolicy()
-    let shieldingConfirmationsPolicy: ConfirmationsPolicy = ConfirmationsPolicy.defaultShieldingPolicy()
+    let confirmationsPolicy = ConfirmationsPolicy.defaultTransferPolicy()
+    let shieldingConfirmationsPolicy = ConfirmationsPolicy.defaultShieldingPolicy()
 
     let dbData: (String, UInt)
     let fsBlockDbRoot: (String, UInt)
@@ -168,8 +168,9 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return validAccount
     }
     
-    // swiftlint:disable:next function_parameter_count
-    @DBActor func importAccount(
+    // swiftlint:disable function_parameter_count
+    @DBActor
+    func importAccount(
         ufvk: String,
         seedFingerprint: [UInt8]?,
         zip32AccountIndex: Zip32AccountIndex?,
@@ -179,6 +180,7 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         name: String,
         keySource: String?
     ) async throws -> AccountUUID {
+        // swiftlint:enable function_parameter_count
         var rUntil: Int64 = -1
         
         if let recoverUntil {
@@ -1137,8 +1139,10 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return branchId
     }
     
-    // swiftlint:disable:next cyclomatic_complexity
-    @DBActor func transactionDataRequests() async throws -> [TransactionDataRequest] {
+    // swiftlint:disable cyclomatic_complexity
+    @DBActor
+    func transactionDataRequests() async throws -> [TransactionDataRequest] {
+        // swiftlint:enable cyclomatic_complexity
         let tDataRequestsPtr = zcashlc_transaction_data_requests(
             dbData.0,
             dbData.1,
@@ -1558,6 +1562,7 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return try JSONDecoder().decode([PIRWitnessedNote].self, from: data)
     }
 }
+// swiftlint:enable type_body_length
 
 private extension ZcashRustBackend {
     static func initializeRust(logLevel: RustLogging) {
@@ -1779,7 +1784,7 @@ extension FfiScanProgress {
     }
 }
 
-// swiftlint:disable large_tuple line_length file_length
+// swiftlint:disable large_tuple line_length
 struct FfiTxId {
     var tuple: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)
     var array: [UInt8] {
@@ -1788,3 +1793,5 @@ struct FfiTxId {
         }
     }
 }
+// swiftlint:enable large_tuple line_length
+// swiftlint:enable file_length

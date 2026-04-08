@@ -67,3 +67,4 @@ extension ZcashSDK {
         }
     }
 }
+// swiftlint:enable force_try line_length
