@@ -101,7 +101,7 @@ pub unsafe extern "C" fn zcashlc_check_nullifiers_pir(
             latest_height: metadata.latest_height,
             spent: spent
                 .into_iter()
-                .map(|is_spent| is_spent.then(SpendMetadataCompat::placeholder))
+                .map(|spend_meta| spend_meta.map(|_| SpendMetadataCompat::placeholder()))
                 .collect(),
         };
 
