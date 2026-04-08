@@ -6,6 +6,7 @@
 //  Copyright © 2019 Electric Coin Company. All rights reserved.
 //
 
+// swiftlint:disable file_length
 import Foundation
 import Combine
 
@@ -979,3 +980,4 @@ extension CompactBlockProcessor {
         }
     }
 }
+// swiftlint:enable file_length

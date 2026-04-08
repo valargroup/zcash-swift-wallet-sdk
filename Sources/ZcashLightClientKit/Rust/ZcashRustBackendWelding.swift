@@ -400,14 +400,61 @@ protocol ZcashRustBackendWelding {
     /// Inserts PIR-detected spent note IDs into the wallet DB.
     func insertPIRSpentNotes(_ noteIds: [Int64]) async throws
 
-    /// Returns PIR-detected spent notes not yet confirmed by the block scanner.
-    func getPIRPendingSpends() async throws -> PIRPendingSpends
+    /// Returns PIR-derived transaction entries for the activity view.
+    func getPIRActivityEntries() async throws -> [PIRActivityEntry]
+
+    // MARK: - Change discovery (serialized through @DBActor)
+
+    /// Trial-decrypts a compact block to discover change notes for a spent note.
+    /// Inserts discovered notes as provisional rows and returns their positions + IDs.
+    ///
+    /// - Parameters:
+    ///   - depth: Hop count from the canonical note (1 = direct change).
+    ///   - parentProvisionalId: ID of the provisional note that was spent to produce
+    ///     these change notes, or `nil` for depth-1 notes whose parent is canonical.
+    // swiftlint:disable:next function_parameter_count
+    func discoverChangeNotes(
+        spentNoteId: Int64,
+        compactBlockBytes: Data,
+        firstOutputPosition: UInt32,
+        actionCount: UInt8,
+        spendHeight: UInt32,
+        depth: UInt32,
+        parentProvisionalId: Int64?
+    ) async throws -> [PIRDiscoveredNote]
+
+    /// Sets witness data on a provisional note after a PIR witness is obtained,
+    /// making it eligible for spendable balance and coin selection.
+    ///
+    /// - Parameters:
+    ///   - noteId: The `provisionalNoteId` returned by ``discoverChangeNotes``,
+    ///     **not** a canonical `orchard_received_notes` ID.
+    ///   - siblings: 1024-byte Merkle authentication path (32 siblings x 32 bytes).
+    ///   - anchorHeight: The block height of the anchor.
+    ///   - anchorRoot: 32-byte anchor root hash.
+    func markProvisionalNoteWitnessed(
+        noteId: Int64,
+        siblings: Data,
+        anchorHeight: UInt64,
+        anchorRoot: Data
+    ) async throws
+
+    /// Returns provisional notes whose nullifiers have not yet been PIR-checked.
+    /// Used by the recursive discovery loop to find notes that need checking.
+    func getProvisionalNotesForPIR() async throws -> [PIRProvisionalNote]
+
+    /// Updates provisional notes after PIR nullifier checks.
+    /// Each entry marks the note as checked; spent entries also set `is_spent = 1`.
+    func markProvisionalPIRResults(_ results: [PIRProvisionalResult]) async throws
 
     // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)
 
     /// Returns Orchard notes that need a PIR witness: they have a tree position
     /// but the shard containing them is not fully scanned.
     func getNotesNeedingPIRWitness() async throws -> [PIRNotePosition]
+
+    /// Returns provisional notes (PIR-discovered change) that need a witness.
+    func getProvisionalNotesNeedingWitness() async throws -> [PIRNotePosition]
 
     /// Returns Orchard notes selected by the provided proposal that may require
     /// a PIR witness refresh before transaction construction.

@@ -85,9 +85,9 @@ incrementalmerkletree = { version = "0.8", default-features = false }
 
 # Spendability PIR
 hex = "0.4"
-spend-client = { git = "https://github.com/valargroup/spendability-pir.git", rev = "bd5ef155bc84d0e25c6a14df31d470d16fc20aeb" }
-spend-types = { git = "https://github.com/valargroup/spendability-pir.git", rev = "bd5ef155bc84d0e25c6a14df31d470d16fc20aeb" }
-witness-client = { git = "https://github.com/valargroup/spendability-pir.git", rev = "bd5ef155bc84d0e25c6a14df31d470d16fc20aeb" }
+spend-client = { git = "https://github.com/valargroup/spendability-pir.git", rev = "3b33092a2988cfdd28edd65837b9ad03b0003fd1" }
+spend-types = { git = "https://github.com/valargroup/spendability-pir.git", rev = "3b33092a2988cfdd28edd65837b9ad03b0003fd1" }
+witness-client = { git = "https://github.com/valargroup/spendability-pir.git", rev = "3b33092a2988cfdd28edd65837b9ad03b0003fd1" }
 
 [dev-dependencies]
 zcash_client_sqlite = { version = "0.19", features = ["test-dependencies"] }
@@ -112,13 +112,13 @@ lto = true
 #   visibility changes needed for voting delegation flows.
 [patch.crates-io]
 orchard = { git = "https://github.com/valargroup/voting-circuits.git" }
-pczt              = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_keys        = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_protocol    = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_address     = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_encoding    = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_transparent = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_primitives  = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
-zcash_proofs      = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-voting-wallet-support" }
+pczt                 = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_keys           = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_protocol       = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_address        = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_encoding       = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_transparent    = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_primitives     = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }
+zcash_proofs         = { git = "https://github.com/valargroup/librustzcash.git", branch = "denver-demo" }

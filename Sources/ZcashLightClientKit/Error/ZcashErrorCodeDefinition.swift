@@ -833,3 +833,4 @@ enum ZcashErrorDefinition {
     // sourcery: code="ZMODEL0002"
     case txIdInvalidHexEncoding
 }
+// swiftlint:enable identifier_name

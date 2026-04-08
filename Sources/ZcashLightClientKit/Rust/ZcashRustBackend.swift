@@ -5,7 +5,7 @@
 //  Created by Jack Grigg on 5/8/19.
 //  Copyright © 2019 Electric Coin Company. All rights reserved.
 //
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 import Foundation
 import libzcashlc
 
@@ -67,8 +67,8 @@ public struct ConfirmationsPolicy {
 }
 
 struct ZcashRustBackend: ZcashRustBackendWelding {
-    let confirmationsPolicy: ConfirmationsPolicy = ConfirmationsPolicy.defaultTransferPolicy()
-    let shieldingConfirmationsPolicy: ConfirmationsPolicy = ConfirmationsPolicy.defaultShieldingPolicy()
+    let confirmationsPolicy = ConfirmationsPolicy.defaultTransferPolicy()
+    let shieldingConfirmationsPolicy = ConfirmationsPolicy.defaultShieldingPolicy()
 
     let dbData: (String, UInt)
     let fsBlockDbRoot: (String, UInt)
@@ -168,8 +168,9 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return validAccount
     }
     
-    // swiftlint:disable:next function_parameter_count
-    @DBActor func importAccount(
+    // swiftlint:disable function_parameter_count
+    @DBActor
+    func importAccount(
         ufvk: String,
         seedFingerprint: [UInt8]?,
         zip32AccountIndex: Zip32AccountIndex?,
@@ -179,6 +180,7 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         name: String,
         keySource: String?
     ) async throws -> AccountUUID {
+        // swiftlint:enable function_parameter_count
         var rUntil: Int64 = -1
         
         if let recoverUntil {
@@ -1137,8 +1139,10 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return branchId
     }
     
-    // swiftlint:disable:next cyclomatic_complexity
-    @DBActor func transactionDataRequests() async throws -> [TransactionDataRequest] {
+    // swiftlint:disable cyclomatic_complexity
+    @DBActor
+    func transactionDataRequests() async throws -> [TransactionDataRequest] {
+        // swiftlint:enable cyclomatic_complexity
         let tDataRequestsPtr = zcashlc_transaction_data_requests(
             dbData.0,
             dbData.1,
@@ -1327,8 +1331,8 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
     }
 
     @DBActor
-    func getPIRPendingSpends() async throws -> PIRPendingSpends {
-        let ptr = zcashlc_get_pir_pending_spends_v2(
+    func getPIRActivityEntries() async throws -> [PIRActivityEntry] {
+        let ptr = zcashlc_get_pir_activity_entries(
             dbData.0,
             dbData.1,
             networkType.networkId
@@ -1336,13 +1340,122 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
 
         guard let ptr else {
             throw SpendabilityBackendError.rustError(
-                lastErrorMessage(fallback: "`getPIRPendingSpends` failed")
+                lastErrorMessage(fallback: "`getPIRActivityEntries` failed")
             )
         }
         defer { zcashlc_free_boxed_slice(ptr) }
 
         let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
-        return try JSONDecoder().decode(PIRPendingSpends.self, from: data)
+        return try JSONDecoder().decode([PIRActivityEntry].self, from: data)
+    }
+
+    // MARK: - Change discovery
+
+    @DBActor
+    func discoverChangeNotes(
+        spentNoteId: Int64,
+        compactBlockBytes: Data,
+        firstOutputPosition: UInt32,
+        actionCount: UInt8,
+        spendHeight: UInt32,
+        depth: UInt32 = 1,
+        parentProvisionalId: Int64? = nil
+    ) async throws -> [PIRDiscoveredNote] {
+        let parentId = parentProvisionalId ?? -1
+        let ptr = compactBlockBytes.withUnsafeBytes { buf in
+            zcashlc_discover_change_notes(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                spentNoteId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count),
+                firstOutputPosition,
+                actionCount,
+                spendHeight,
+                depth,
+                parentId
+            )
+        }
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`discoverChangeNotes` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRDiscoveredNote].self, from: data)
+    }
+
+    @DBActor
+    func getProvisionalNotesForPIR() async throws -> [PIRProvisionalNote] {
+        let ptr = zcashlc_get_provisional_notes_for_pir(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`getProvisionalNotesForPIR` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRProvisionalNote].self, from: data)
+    }
+
+    @DBActor
+    func markProvisionalPIRResults(_ results: [PIRProvisionalResult]) async throws {
+        let jsonData = try JSONEncoder().encode(results)
+        let result = jsonData.withUnsafeBytes { buf in
+            zcashlc_mark_provisional_pir_results(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count)
+            )
+        }
+
+        guard result == 0 else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`markProvisionalPIRResults` failed")
+            )
+        }
+    }
+
+    @DBActor
+    func markProvisionalNoteWitnessed(
+        noteId: Int64,
+        siblings: Data,
+        anchorHeight: UInt64,
+        anchorRoot: Data
+    ) async throws {
+        let result = siblings.withUnsafeBytes { siblingsPtr in
+            anchorRoot.withUnsafeBytes { rootPtr in
+                zcashlc_mark_provisional_note_witnessed(
+                    dbData.0,
+                    dbData.1,
+                    networkType.networkId,
+                    noteId,
+                    siblingsPtr.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                    UInt(siblings.count),
+                    anchorHeight,
+                    rootPtr.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                    UInt(anchorRoot.count)
+                )
+            }
+        }
+
+        guard result == 0 else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`markProvisionalNoteWitnessed` failed")
+            )
+        }
     }
 
     // MARK: - Witness PIR
@@ -1358,6 +1471,25 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         guard let ptr else {
             throw WitnessBackendError.rustError(
                 lastErrorMessage(fallback: "`getNotesNeedingPIRWitness` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRNotePosition].self, from: data)
+    }
+
+    @DBActor
+    func getProvisionalNotesNeedingWitness() async throws -> [PIRNotePosition] {
+        let ptr = zcashlc_get_provisional_notes_needing_witness(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw WitnessBackendError.rustError(
+                lastErrorMessage(fallback: "`getProvisionalNotesNeedingWitness` failed")
             )
         }
         defer { zcashlc_free_boxed_slice(ptr) }
@@ -1430,6 +1562,7 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
         return try JSONDecoder().decode([PIRWitnessedNote].self, from: data)
     }
 }
+// swiftlint:enable type_body_length
 
 private extension ZcashRustBackend {
     static func initializeRust(logLevel: RustLogging) {
@@ -1651,7 +1784,7 @@ extension FfiScanProgress {
     }
 }
 
-// swiftlint:disable large_tuple line_length file_length
+// swiftlint:disable large_tuple line_length
 struct FfiTxId {
     var tuple: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8)
     var array: [UInt8] {
@@ -1660,3 +1793,5 @@ struct FfiTxId {
         }
     }
 }
+// swiftlint:enable large_tuple line_length
+// swiftlint:enable file_length

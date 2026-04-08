@@ -189,3 +189,4 @@ extension SyncStatus {
         }
     }
 }
+// swiftlint:enable force_try force_cast

@@ -31,10 +31,6 @@ class TestServersViewController: UIViewController {
 
     var startTime: TimeInterval = 0.0
     
-    override func viewDidLoad() {
-        super.viewDidLoad()
-    }
-    
     @IBAction func testServers(_ sender: Any) {
         let synchronizer = AppDelegate.shared.sharedSynchronizer
         testServersBtn.isEnabled = false
@@ -48,7 +44,8 @@ class TestServersViewController: UIViewController {
         }
     }
     
-    @MainActor func showResults(_ endpoints: [LightWalletEndpoint]) async {
+    @MainActor
+    func showResults(_ endpoints: [LightWalletEndpoint]) async {
         testServersBtn.isEnabled = true
         
         var resultStr = ""

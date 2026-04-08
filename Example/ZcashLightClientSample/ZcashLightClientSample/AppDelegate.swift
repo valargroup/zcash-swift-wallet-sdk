@@ -231,3 +231,4 @@ public extension NotificationBubble {
         ]
     }
 }
+// swiftlint:enable force_cast force_try force_unwrapping

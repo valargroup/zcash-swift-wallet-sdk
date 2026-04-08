@@ -10,7 +10,8 @@ import Foundation
 import Combine
 
 /// Synchronizer implementation for UIKit and iOS 13+
-// swiftlint:disable type_body_length file_length
+// swiftlint:disable type_body_length
+// swiftlint:disable file_length
 public class SDKSynchronizer: Synchronizer {
     private enum Constants {
         static let fixWitnessesLastVersionCall = "ud_fixWitnessesLastVersionCall"
@@ -251,7 +252,7 @@ public class SDKSynchronizer: Synchronizer {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         let lastVersionCall = UserDefaults.standard.string(forKey: Constants.fixWitnessesLastVersionCall)
         
-        guard lastVersionCall == nil || lastVersionCall! < appVersion else { return }
+        guard lastVersionCall.map({ $0 < appVersion }) ?? true else { return }
         
         UserDefaults.standard.set(appVersion, forKey: Constants.fixWitnessesLastVersionCall)
         await initializer.rustBackend.fixWitnesses()
@@ -1170,17 +1171,32 @@ public class SDKSynchronizer: Synchronizer {
         try await initializer.rustBackend.deleteAccount(accountUUID)
     }
 
+    /// Runs PIR-based spendability checking with recursive change discovery.
+    ///
+    /// Phase 1: checks canonical unspent notes against the PIR server, discovers
+    /// depth-1 change notes via RPC block download + trial decryption.
+    ///
+    /// Phase 2: recursively checks discovered provisional notes, following the
+    /// spend chain until all leaves are unspent (or `maxDepth` is reached).
+    ///
+    /// - Parameters:
+    ///   - pirServerUrl: URL of the PIR nullifier-check server.
+    ///   - progress: Optional callback for progress reporting.
+    ///   - maxDepth: Maximum recursion depth (default 20). Safety cap to prevent
+    ///     runaway loops.
+    /// - Returns: Summary of the spendability check including which canonical
+    ///   notes were found to be spent and the total value of those notes.
     public func checkWalletSpendability(
         pirServerUrl: String,
-        progress: SpendabilityProgressHandler?
+        progress: SpendabilityProgressHandler?,
+        maxDepth: Int = 20
     ) async throws -> SpendabilityResult {
-        // Read unspent notes (@DBActor — serialized with sync)
+        // Phase 1: Check canonical unspent notes
         let notes = try await initializer.rustBackend.getUnspentOrchardNotesForPIR()
         guard !notes.isEmpty else {
             return SpendabilityResult(earliestHeight: 0, latestHeight: 0, spentNoteIds: [], totalSpentValue: 0)
         }
 
-        // Check nullifiers against PIR server (detached — no DB connection held)
         let checkResult = try await Task.detached(priority: .userInitiated) {
             try SpendabilityBackend().checkNullifiersPIR(
                 notes: notes,
@@ -1189,14 +1205,67 @@ public class SDKSynchronizer: Synchronizer {
             )
         }.value
 
-        // Identify spent notes (non-nil metadata = spent)
-        let spentNotes = zip(notes, checkResult.spent).filter { $0.1 != nil }
+        let spentNotes: [(PIRUnspentNote, PIRSpendMetadata)] = zip(notes, checkResult.spent)
+            .compactMap { note, meta in meta.map { (note, $0) } }
         let spentNoteIds = spentNotes.map(\.0.id)
         let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
 
-        // Insert spent notes (@DBActor — serialized with sync)
         if !spentNoteIds.isEmpty {
             try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
+        }
+
+        // Depth-1 change discovery for canonical spent notes
+        let service = initializer.lightWalletService
+        let mode = await sdkFlags.ifTor(.uniqueTor)
+        for (note, metadata) in spentNotes {
+            await discoverChangeAtDepth(
+                service: service,
+                mode: mode,
+                spentNoteId: note.id,
+                metadata: metadata,
+                depth: 1,
+                parentProvisionalId: nil
+            )
+        }
+
+        // Phase 2: Recursive discovery of deeper provisional notes.
+        // Each iteration PIR-checks all unchecked provisionals and discovers
+        // the next depth level. Capped at maxDepth iterations as a safety limit.
+        for _ in 0..<maxDepth {
+            let unchecked = try await initializer.rustBackend.getProvisionalNotesForPIR()
+            guard !unchecked.isEmpty else { break }
+
+            // Convert to PIRUnspentNote for the PIR client (same nf/value shape)
+            let notesForPIR = unchecked.map {
+                PIRUnspentNote(id: $0.id, nf: $0.nf, value: $0.value)
+            }
+
+            let pirResult = try await Task.detached(priority: .userInitiated) {
+                try SpendabilityBackend().checkNullifiersPIR(
+                    notes: notesForPIR,
+                    pirServerUrl: pirServerUrl,
+                    progress: nil
+                )
+            }.value
+
+            let provisionalResults: [PIRProvisionalResult] = zip(unchecked, pirResult.spent)
+                .map { note, meta in PIRProvisionalResult(id: note.id, spent: meta != nil) }
+            try await initializer.rustBackend.markProvisionalPIRResults(provisionalResults)
+
+            let spentProvisionals: [(PIRProvisionalNote, PIRSpendMetadata)] = zip(unchecked, pirResult.spent)
+                .compactMap { note, meta in meta.map { (note, $0) } }
+            guard !spentProvisionals.isEmpty else { break }
+
+            for (provisional, metadata) in spentProvisionals {
+                await discoverChangeAtDepth(
+                    service: service,
+                    mode: mode,
+                    spentNoteId: provisional.spentNoteId,
+                    metadata: metadata,
+                    depth: provisional.depth + 1,
+                    parentProvisionalId: provisional.id
+                )
+            }
         }
 
         return SpendabilityResult(
@@ -1207,44 +1276,150 @@ public class SDKSynchronizer: Synchronizer {
         )
     }
 
-    public func getPIRPendingSpends() async throws -> PIRPendingSpends {
-        try await initializer.rustBackend.getPIRPendingSpends()
+    /// Fetches a compact block and trial-decrypts it to discover change notes
+    /// at a given depth in the spend chain.
+    // swiftlint:disable:next function_parameter_count
+    private func discoverChangeAtDepth(
+        service: LightWalletService,
+        mode: ServiceMode,
+        spentNoteId: Int64,
+        metadata: PIRSpendMetadata,
+        depth: UInt32,
+        parentProvisionalId: Int64?
+    ) async {
+        let height = BlockHeight(metadata.spendHeight)
+        do {
+            var blockData: Data?
+            for try await block in try service.blockRange(height...height, mode: mode) {
+                blockData = block.data
+            }
+            guard let compactBlockBytes = blockData else {
+                logger.warn("Change discovery depth \(depth): no block at height \(height)")
+                return
+            }
+
+            let discovered = try await initializer.rustBackend.discoverChangeNotes(
+                spentNoteId: spentNoteId,
+                compactBlockBytes: compactBlockBytes,
+                firstOutputPosition: metadata.firstOutputPosition,
+                actionCount: metadata.actionCount,
+                spendHeight: metadata.spendHeight,
+                depth: depth,
+                parentProvisionalId: parentProvisionalId
+            )
+
+            if !discovered.isEmpty {
+                logger.info("Change discovery depth \(depth): found \(discovered.count) note(s) at height \(height)")
+            }
+        } catch {
+            logger.warn("Change discovery depth \(depth) failed at height \(height): \(error)")
+        }
+    }
+
+    public func getPIRActivityEntries() async throws -> [PIRActivityEntry] {
+        try await initializer.rustBackend.getPIRActivityEntries()
     }
 
     public func fetchNoteWitnesses(
         pirServerUrl: String,
         progress: SpendabilityProgressHandler?
     ) async throws -> WitnessResult {
-        let notes = try await initializer.rustBackend.getNotesNeedingPIRWitness()
-        guard !notes.isEmpty else {
-            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+        var allWitnessedIds: [Int64] = []
+        var allWitnessedValue: UInt64 = 0
+
+        // Phase 1: Canonical notes (from orchard_received_notes, shard not fully scanned)
+        let canonicalNotes = try await initializer.rustBackend.getNotesNeedingPIRWitness()
+        if !canonicalNotes.isEmpty {
+            let witnessResult = try await Task.detached(priority: .userInitiated) {
+                try WitnessBackend().fetchWitnesses(
+                    notes: canonicalNotes,
+                    pirServerUrl: pirServerUrl,
+                    progress: progress
+                )
+            }.value
+
+            if !witnessResult.witnesses.isEmpty {
+                try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+
+                let ids = witnessResult.witnesses.map(\.noteId)
+                allWitnessedIds.append(contentsOf: ids)
+                allWitnessedValue += canonicalNotes
+                    .filter { ids.contains($0.id) }
+                    .map(\.value)
+                    .reduce(0, +)
+            }
         }
 
-        let witnessResult = try await Task.detached(priority: .userInitiated) {
-            try WitnessBackend().fetchWitnesses(
-                notes: notes,
-                pirServerUrl: pirServerUrl,
-                progress: progress
-            )
-        }.value
+        // Phase 2: Provisional notes (PIR-discovered change, not yet in canonical scan)
+        let provisionalNotes = try await initializer.rustBackend.getProvisionalNotesNeedingWitness()
+        if !provisionalNotes.isEmpty {
+            let provWitnessResult = try await Task.detached(priority: .userInitiated) {
+                try WitnessBackend().fetchWitnesses(
+                    notes: provisionalNotes,
+                    pirServerUrl: pirServerUrl,
+                    progress: nil
+                )
+            }.value
 
-        guard !witnessResult.witnesses.isEmpty else {
-            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+            for witness in provWitnessResult.witnesses {
+                let siblingsData = Self.decodeSiblingsHex(witness.siblings)
+                let anchorRootData = Self.decodeHex(witness.anchorRoot)
+                try await initializer.rustBackend.markProvisionalNoteWitnessed(
+                    noteId: witness.noteId,
+                    siblings: siblingsData,
+                    anchorHeight: witness.anchorHeight,
+                    anchorRoot: anchorRootData
+                )
+                allWitnessedIds.append(witness.noteId)
+            }
+
+            let provIds = Set(provWitnessResult.witnesses.map(\.noteId))
+            allWitnessedValue += provisionalNotes
+                .filter { provIds.contains($0.id) }
+                .map(\.value)
+                .reduce(0, +)
         }
 
-        try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
-        await sdkFlags.setPIRWitnessServerURL(pirServerUrl)
-
-        let witnessedIds = witnessResult.witnesses.map(\.noteId)
-        let totalValue = notes
-            .filter { witnessedIds.contains($0.id) }
-            .map(\.value)
-            .reduce(0, +)
+        if !allWitnessedIds.isEmpty {
+            await sdkFlags.setPIRWitnessServerURL(pirServerUrl)
+        }
 
         return WitnessResult(
-            witnessedNoteIds: witnessedIds,
-            totalWitnessedValue: totalValue
+            witnessedNoteIds: allWitnessedIds,
+            totalWitnessedValue: allWitnessedValue
         )
+    }
+
+    private static func decodeHex(_ hex: String) -> Data {
+        let chars = Array(hex.utf8)
+        var data = Data(capacity: chars.count / 2)
+        var idx = 0
+        while idx + 1 < chars.count {
+            guard let high = hexVal(chars[idx]), let low = hexVal(chars[idx + 1]) else {
+                idx += 2
+                continue
+            }
+            data.append(high << 4 | low)
+            idx += 2
+        }
+        return data
+    }
+
+    private static func hexVal(_ char: UInt8) -> UInt8? {
+        switch char {
+        case 0x30...0x39: return char - 0x30        // 0-9
+        case 0x41...0x46: return char - 0x41 + 10   // A-F
+        case 0x61...0x66: return char - 0x61 + 10   // a-f
+        default: return nil
+        }
+    }
+
+    private static func decodeSiblingsHex(_ siblings: [String]) -> Data {
+        var data = Data(capacity: 1024)
+        for hex in siblings {
+            data.append(decodeHex(hex))
+        }
+        return data
     }
 
     public func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
@@ -1523,3 +1698,5 @@ extension SessionTicker {
         }
     }
 }
+// swiftlint:enable type_body_length
+// swiftlint:enable file_length

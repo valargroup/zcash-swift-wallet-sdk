@@ -124,3 +124,4 @@ class SaplingParametersViewController: UIViewController {
         self.updateButtons()
     }
 }
+// swiftlint:enable force_try

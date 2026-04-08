@@ -101,7 +101,6 @@ final class SDKMetricsImpl: SDKMetrics {
         cbpOverview[lastActionInRun] = report
     }
     
-    // swiftlint:disable:next string_concatenation
     func logCBPOverviewReport(_ logger: Logger, walletSummary: WalletSummary?) async {
         actionStop()
 
