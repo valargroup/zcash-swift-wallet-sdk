@@ -104,6 +104,7 @@ final class PIRWitnessRetryOfflineTests: ZcashTestCase {
     private func makeSynchronizer(
         rustBackend: ZcashRustBackendWeldingMock,
         transactionEncoder: RetryTestTransactionEncoder,
+        syncStatus: InternalSyncStatus = .synced,
         pirWitnessFetcher: @escaping SDKSynchronizer.PIRWitnessFetcher = { _, _, _ in
             preconditionFailure("Unexpected PIR witness fetch")
         }
@@ -134,7 +135,7 @@ final class PIRWitnessRetryOfflineTests: ZcashTestCase {
             walletBirthdayProvider: { 1 }
         )
         let synchronizer = SDKSynchronizer(
-            status: .synced,
+            status: syncStatus,
             initializer: initializer,
             transactionEncoder: transactionEncoder,
             transactionRepository: initializer.transactionRepository,
@@ -142,7 +143,7 @@ final class PIRWitnessRetryOfflineTests: ZcashTestCase {
             syncSessionTicker: .live,
             pirWitnessFetcher: pirWitnessFetcher
         )
-        await synchronizer.updateStatus(.synced, updateExternalStatus: false)
+        await synchronizer.updateStatus(syncStatus, updateExternalStatus: false)
 
         return (synchronizer, initializer.container.resolve(SDKFlags.self))
     }
@@ -302,5 +303,143 @@ final class PIRWitnessRetryOfflineTests: ZcashTestCase {
         XCTAssertEqual(transactionEncoder.createProposedTransactionsCallsCount, 2)
         XCTAssertEqual(rustBackend.getPIRWitnessNotesCallsCount, 1)
         XCTAssertEqual(rustBackend.insertPIRWitnessesCallsCount, 1)
+    }
+
+    // MARK: - Proactive alignment tests
+
+    func testProactiveAlignmentFetchesWitnessesWhenSyncing() async throws {
+        let rustBackend = ZcashRustBackendWeldingMock()
+        let transactionEncoder = RetryTestTransactionEncoder()
+        transactionEncoder.createResults = [.success([])]
+
+        let note = makeNotePosition()
+        rustBackend.getPIRWitnessNotesReturnValue = [note]
+
+        let witnessEntry = makeWitnessEntry()
+        var fetchCount = 0
+        let (synchronizer, sdkFlags) = try await makeSynchronizer(
+            rustBackend: rustBackend,
+            transactionEncoder: transactionEncoder,
+            syncStatus: .syncing(0.5, false),
+            pirWitnessFetcher: { _, _, _ in
+                fetchCount += 1
+                return PIRWitnessResult(witnesses: [witnessEntry])
+            }
+        )
+        await sdkFlags.setPIRWitnessServerURL("http://localhost:8080")
+
+        let stream = try await synchronizer.createProposedTransactions(
+            proposal: makeProposal(),
+            spendingKey: try makeSpendingKey(network: synchronizer.network)
+        )
+
+        var iterator = stream.makeAsyncIterator()
+        let next = try await iterator.next()
+        XCTAssertNil(next)
+        XCTAssertEqual(fetchCount, 1, "Proactive alignment should fetch witnesses once")
+        XCTAssertEqual(transactionEncoder.createProposedTransactionsCallsCount, 1)
+        XCTAssertEqual(rustBackend.insertPIRWitnessesCallsCount, 1)
+    }
+
+    func testProactiveAlignmentSkippedWhenSynced() async throws {
+        let rustBackend = ZcashRustBackendWeldingMock()
+        let transactionEncoder = RetryTestTransactionEncoder()
+        transactionEncoder.createResults = [.success([])]
+        rustBackend.getPIRWitnessNotesReturnValue = [makeNotePosition()]
+
+        let (synchronizer, sdkFlags) = try await makeSynchronizer(
+            rustBackend: rustBackend,
+            transactionEncoder: transactionEncoder,
+            syncStatus: .synced
+        )
+        await sdkFlags.setPIRWitnessServerURL("http://localhost:8080")
+
+        let stream = try await synchronizer.createProposedTransactions(
+            proposal: makeProposal(),
+            spendingKey: try makeSpendingKey(network: synchronizer.network)
+        )
+
+        var iterator = stream.makeAsyncIterator()
+        _ = try await iterator.next()
+        XCTAssertEqual(rustBackend.getPIRWitnessNotesCallsCount, 0, "Should not query notes when synced")
+        XCTAssertEqual(rustBackend.insertPIRWitnessesCallsCount, 0)
+    }
+
+    func testProactiveAlignmentSkippedWithoutWitnessServerURL() async throws {
+        let rustBackend = ZcashRustBackendWeldingMock()
+        let transactionEncoder = RetryTestTransactionEncoder()
+        transactionEncoder.createResults = [.success([])]
+
+        let (synchronizer, _) = try await makeSynchronizer(
+            rustBackend: rustBackend,
+            transactionEncoder: transactionEncoder,
+            syncStatus: .syncing(0.3, false)
+        )
+
+        let stream = try await synchronizer.createProposedTransactions(
+            proposal: makeProposal(),
+            spendingKey: try makeSpendingKey(network: synchronizer.network)
+        )
+
+        var iterator = stream.makeAsyncIterator()
+        _ = try await iterator.next()
+        XCTAssertEqual(rustBackend.getPIRWitnessNotesCallsCount, 0, "Should not query notes without witness URL")
+    }
+
+    func testMixedCanonicalAndProvisionalWitnessInsertion() async throws {
+        let rustBackend = ZcashRustBackendWeldingMock()
+        let transactionEncoder = RetryTestTransactionEncoder()
+        transactionEncoder.createResults = [.success([])]
+
+        let canonicalNote = PIRNotePosition(id: 5, position: 100, value: 50_000)
+        let provisionalNote = PIRNotePosition(id: -3, position: 200, value: 30_000)
+        rustBackend.getPIRWitnessNotesReturnValue = [canonicalNote, provisionalNote]
+
+        let canonicalWitness = PIRWitnessEntry(
+            noteId: 5,
+            position: 100,
+            siblings: Array(repeating: String(repeating: "aa", count: 32), count: 32),
+            anchorHeight: 2_000,
+            anchorRoot: String(repeating: "bb", count: 32)
+        )
+        let provisionalWitness = PIRWitnessEntry(
+            noteId: -3,
+            position: 200,
+            siblings: Array(repeating: String(repeating: "cc", count: 32), count: 32),
+            anchorHeight: 2_000,
+            anchorRoot: String(repeating: "dd", count: 32)
+        )
+
+        var receivedProvisionalNoteId: Int64?
+        rustBackend.markProvisionalNoteWitnessedClosure = { noteId, _, _, _ in
+            receivedProvisionalNoteId = noteId
+        }
+
+        let (synchronizer, sdkFlags) = try await makeSynchronizer(
+            rustBackend: rustBackend,
+            transactionEncoder: transactionEncoder,
+            syncStatus: .syncing(0.5, false),
+            pirWitnessFetcher: { _, _, _ in
+                PIRWitnessResult(witnesses: [canonicalWitness, provisionalWitness])
+            }
+        )
+        await sdkFlags.setPIRWitnessServerURL("http://localhost:8080")
+
+        let stream = try await synchronizer.createProposedTransactions(
+            proposal: makeProposal(),
+            spendingKey: try makeSpendingKey(network: synchronizer.network)
+        )
+
+        var iterator = stream.makeAsyncIterator()
+        _ = try await iterator.next()
+
+        XCTAssertEqual(rustBackend.insertPIRWitnessesCallsCount, 1, "Canonical witness should use insertPIRWitnesses")
+        XCTAssertEqual(
+            rustBackend.insertPIRWitnessesReceivedWitnesses,
+            [canonicalWitness],
+            "Only canonical (positive ID) witnesses should go through insertPIRWitnesses"
+        )
+        XCTAssertEqual(rustBackend.markProvisionalNoteWitnessedCallsCount, 1, "Provisional witness should use markProvisionalNoteWitnessed")
+        XCTAssertEqual(receivedProvisionalNoteId, 3, "Provisional note ID should be passed as abs(noteId)")
     }
 }

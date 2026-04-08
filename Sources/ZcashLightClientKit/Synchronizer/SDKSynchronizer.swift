@@ -443,6 +443,8 @@ public class SDKSynchronizer: Synchronizer {
             logger: logger
         )
 
+        try await alignProposalWitnesses(proposal: proposal)
+
         let transactions: [ZcashTransaction.Overview]
         do {
             transactions = try await transactionEncoder.createProposedTransactions(
@@ -450,11 +452,9 @@ public class SDKSynchronizer: Synchronizer {
                 spendingKey: spendingKey
             )
         } catch {
-            // Proposal-selected Orchard inputs can carry PIR witnesses that became
-            // stale relative to the anchor used during transaction construction.
-            // When that specific mismatch is detected, refresh just the witnesses
-            // for this proposal and retry transaction creation once. All other
-            // errors are rethrown unchanged.
+            // Safety net: if the proactive alignment didn't run (already synced)
+            // or the broadcast changed between alignment and tx creation, retry
+            // once after refreshing witnesses.
             if try await refreshProposalWitnessesIfNeeded(after: error, proposal: proposal) {
                 transactions = try await transactionEncoder.createProposedTransactions(
                     proposal: proposal,
@@ -1376,6 +1376,58 @@ public class SDKSynchronizer: Synchronizer {
         try await initializer.rustBackend.getPIRWitnessedNotes()
     }
 
+    // Fetches fresh PIR witnesses for all Orchard notes in the proposal and
+    // inserts them so they share the same anchor height. Only runs when the
+    // wallet is still syncing — once fully synced the ShardTree witnesses are
+    // authoritative and no PIR refresh is needed.
+    private func alignProposalWitnesses(proposal: Proposal) async throws {
+        let currentStatus = await status
+        if case .synced = currentStatus { return }
+
+        guard let witnessServerURL = await sdkFlags.pirWitnessServerURL else { return }
+
+        let notes = try await initializer.rustBackend.getPIRWitnessNotes(for: proposal.inner)
+        guard !notes.isEmpty else { return }
+
+        logger.debug("Aligning PIR witnesses for \(notes.count) Orchard notes before tx creation")
+        let fetchWitnesses = pirWitnessFetcher
+        let witnessResult = try await Task.detached(priority: .userInitiated) {
+            try fetchWitnesses(notes, witnessServerURL, nil)
+        }.value
+
+        guard !witnessResult.witnesses.isEmpty else {
+            logger.debug("Witness alignment skipped: server returned no witnesses")
+            return
+        }
+
+        try await insertMixedWitnesses(witnessResult.witnesses)
+        logger.debug("Aligned \(witnessResult.witnesses.count) PIR witnesses to same anchor")
+    }
+
+    // Inserts a batch of PIR witnesses that may contain both canonical (positive
+    // noteId) and provisional (negative noteId) entries. Canonical witnesses go
+    // through `insertPIRWitnesses`; provisional ones are routed individually to
+    // `markProvisionalNoteWitnessed`.
+    private func insertMixedWitnesses(_ witnesses: [PIRWitnessEntry]) async throws {
+        let canonical = witnesses.filter { $0.noteId > 0 }
+        let provisional = witnesses.filter { $0.noteId < 0 }
+
+        if !canonical.isEmpty {
+            try await initializer.rustBackend.insertPIRWitnesses(canonical)
+        }
+
+        for witness in provisional {
+            let siblingsData = Self.decodeSiblingsHex(witness.siblings)
+            let anchorRootData = Self.decodeHex(witness.anchorRoot)
+            try await initializer.rustBackend.markProvisionalNoteWitnessed(
+                noteId: abs(witness.noteId),
+                siblings: siblingsData,
+                anchorHeight: witness.anchorHeight,
+                anchorRoot: anchorRootData
+            )
+        }
+    }
+
     // Returns true only when the synchronizer refreshed and inserted replacement
     // PIR witnesses for Orchard notes referenced by this proposal. The refresh is
     // intentionally scoped to proposal-selected notes instead of all notes that
@@ -1415,7 +1467,7 @@ public class SDKSynchronizer: Synchronizer {
 
         logger.debug("PIR witness retry fetched \(witnessResult.witnesses.count) witnesses")
 
-        try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+        try await insertMixedWitnesses(witnessResult.witnesses)
         return true
     }
 
