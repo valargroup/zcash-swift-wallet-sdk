@@ -452,6 +452,9 @@ protocol ZcashRustBackendWelding {
     /// but the shard containing them is not fully scanned.
     func getNotesNeedingPIRWitness() async throws -> [PIRNotePosition]
 
+    /// Returns provisional notes (PIR-discovered change) that need a witness.
+    func getProvisionalNotesNeedingWitness() async throws -> [PIRNotePosition]
+
     /// Returns Orchard notes selected by the provided proposal that may require
     /// a PIR witness refresh before transaction construction.
     func getPIRWitnessNotes(for proposal: FfiProposal) async throws -> [PIRNotePosition]

@@ -4175,6 +4175,25 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
         }
     }
 
+    // MARK: - getProvisionalNotesNeedingWitness
+
+    var getProvisionalNotesNeedingWitnessThrowableError: Error?
+    var getProvisionalNotesNeedingWitnessCallsCount = 0
+    var getProvisionalNotesNeedingWitnessReturnValue: [PIRNotePosition] = []
+    var getProvisionalNotesNeedingWitnessClosure: (() async throws -> [PIRNotePosition])?
+
+    func getProvisionalNotesNeedingWitness() async throws -> [PIRNotePosition] {
+        if let error = getProvisionalNotesNeedingWitnessThrowableError {
+            throw error
+        }
+        getProvisionalNotesNeedingWitnessCallsCount += 1
+        if let closure = getProvisionalNotesNeedingWitnessClosure {
+            return try await closure()
+        } else {
+            return getProvisionalNotesNeedingWitnessReturnValue
+        }
+    }
+
     // MARK: - getPIRWitnessNotes
 
     var getPIRWitnessNotesThrowableError: Error?

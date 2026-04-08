@@ -1272,36 +1272,102 @@ public class SDKSynchronizer: Synchronizer {
         pirServerUrl: String,
         progress: SpendabilityProgressHandler?
     ) async throws -> WitnessResult {
-        let notes = try await initializer.rustBackend.getNotesNeedingPIRWitness()
-        guard !notes.isEmpty else {
-            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+        var allWitnessedIds: [Int64] = []
+        var allWitnessedValue: UInt64 = 0
+
+        // Phase 1: Canonical notes (from orchard_received_notes, shard not fully scanned)
+        let canonicalNotes = try await initializer.rustBackend.getNotesNeedingPIRWitness()
+        if !canonicalNotes.isEmpty {
+            let witnessResult = try await Task.detached(priority: .userInitiated) {
+                try WitnessBackend().fetchWitnesses(
+                    notes: canonicalNotes,
+                    pirServerUrl: pirServerUrl,
+                    progress: progress
+                )
+            }.value
+
+            if !witnessResult.witnesses.isEmpty {
+                try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
+
+                let ids = witnessResult.witnesses.map(\.noteId)
+                allWitnessedIds.append(contentsOf: ids)
+                allWitnessedValue += canonicalNotes
+                    .filter { ids.contains($0.id) }
+                    .map(\.value)
+                    .reduce(0, +)
+            }
         }
 
-        let witnessResult = try await Task.detached(priority: .userInitiated) {
-            try WitnessBackend().fetchWitnesses(
-                notes: notes,
-                pirServerUrl: pirServerUrl,
-                progress: progress
-            )
-        }.value
+        // Phase 2: Provisional notes (PIR-discovered change, not yet in canonical scan)
+        let provisionalNotes = try await initializer.rustBackend.getProvisionalNotesNeedingWitness()
+        if !provisionalNotes.isEmpty {
+            let provWitnessResult = try await Task.detached(priority: .userInitiated) {
+                try WitnessBackend().fetchWitnesses(
+                    notes: provisionalNotes,
+                    pirServerUrl: pirServerUrl,
+                    progress: nil
+                )
+            }.value
 
-        guard !witnessResult.witnesses.isEmpty else {
-            return WitnessResult(witnessedNoteIds: [], totalWitnessedValue: 0)
+            for witness in provWitnessResult.witnesses {
+                let siblingsData = Self.decodeSiblingsHex(witness.siblings)
+                let anchorRootData = Self.decodeHex(witness.anchorRoot)
+                try await initializer.rustBackend.markProvisionalNoteWitnessed(
+                    noteId: witness.noteId,
+                    siblings: siblingsData,
+                    anchorHeight: witness.anchorHeight,
+                    anchorRoot: anchorRootData
+                )
+                allWitnessedIds.append(witness.noteId)
+            }
+
+            let provIds = Set(provWitnessResult.witnesses.map(\.noteId))
+            allWitnessedValue += provisionalNotes
+                .filter { provIds.contains($0.id) }
+                .map(\.value)
+                .reduce(0, +)
         }
 
-        try await initializer.rustBackend.insertPIRWitnesses(witnessResult.witnesses)
-        await sdkFlags.setPIRWitnessServerURL(pirServerUrl)
-
-        let witnessedIds = witnessResult.witnesses.map(\.noteId)
-        let totalValue = notes
-            .filter { witnessedIds.contains($0.id) }
-            .map(\.value)
-            .reduce(0, +)
+        if !allWitnessedIds.isEmpty {
+            await sdkFlags.setPIRWitnessServerURL(pirServerUrl)
+        }
 
         return WitnessResult(
-            witnessedNoteIds: witnessedIds,
-            totalWitnessedValue: totalValue
+            witnessedNoteIds: allWitnessedIds,
+            totalWitnessedValue: allWitnessedValue
         )
+    }
+
+    private static func decodeHex(_ hex: String) -> Data {
+        let chars = Array(hex.utf8)
+        var data = Data(capacity: chars.count / 2)
+        var i = 0
+        while i + 1 < chars.count {
+            guard let hi = hexVal(chars[i]), let lo = hexVal(chars[i + 1]) else {
+                i += 2
+                continue
+            }
+            data.append(hi << 4 | lo)
+            i += 2
+        }
+        return data
+    }
+
+    private static func hexVal(_ c: UInt8) -> UInt8? {
+        switch c {
+        case 0x30...0x39: return c - 0x30        // 0-9
+        case 0x41...0x46: return c - 0x41 + 10   // A-F
+        case 0x61...0x66: return c - 0x61 + 10   // a-f
+        default: return nil
+        }
+    }
+
+    private static func decodeSiblingsHex(_ siblings: [String]) -> Data {
+        var data = Data(capacity: 1024)
+        for hex in siblings {
+            data.append(decodeHex(hex))
+        }
+        return data
     }
 
     public func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {

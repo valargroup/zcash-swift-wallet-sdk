@@ -4306,6 +4306,49 @@ pub unsafe extern "C" fn zcashlc_get_notes_needing_pir_witness(
     unwrap_exc_or_null(res)
 }
 
+/// Returns provisional notes that need a PIR witness (have a position but no witness yet).
+///
+/// Returns JSON `[{"id":i64,"position":u64,"value":u64}, ...]`, or null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and point to a path-encoded byte array of length `db_data_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_get_provisional_notes_needing_witness(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let notes = db_data
+            .get_provisional_notes_needing_witness()
+            .map_err(|e| anyhow!("failed to query provisional notes needing witness: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct Note {
+            id: i64,
+            position: u64,
+            value: u64,
+        }
+
+        let out: Vec<Note> = notes
+            .into_iter()
+            .map(|n| Note {
+                id: n.id,
+                position: n.position,
+                value: n.value,
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&out)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
 /// Returns Orchard notes referenced by a proposal that can be refreshed via witness PIR.
 ///
 /// Returns JSON `[{"id":i64,"position":u64,"value":u64}, ...]`, or null on error.

@@ -1476,6 +1476,25 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
     }
 
     @DBActor
+    func getProvisionalNotesNeedingWitness() async throws -> [PIRNotePosition] {
+        let ptr = zcashlc_get_provisional_notes_needing_witness(
+            dbData.0,
+            dbData.1,
+            networkType.networkId
+        )
+
+        guard let ptr else {
+            throw WitnessBackendError.rustError(
+                lastErrorMessage(fallback: "`getProvisionalNotesNeedingWitness` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([PIRNotePosition].self, from: data)
+    }
+
+    @DBActor
     func getPIRWitnessNotes(for proposal: FfiProposal) async throws -> [PIRNotePosition] {
         let proposalBytes = try proposal.serializedData(partial: false).bytes
         let ptr = proposalBytes.withUnsafeBufferPointer { proposalPtr in
