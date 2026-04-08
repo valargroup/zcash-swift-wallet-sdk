@@ -3454,7 +3454,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 [[package]]
 name = "pir-types"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/spendability-pir.git?rev=bd5ef155bc84d0e25c6a14df31d470d16fc20aeb#bd5ef155bc84d0e25c6a14df31d470d16fc20aeb"
+source = "git+https://github.com/valargroup/spendability-pir.git?rev=3b33092a2988cfdd28edd65837b9ad03b0003fd1#3b33092a2988cfdd28edd65837b9ad03b0003fd1"
 dependencies = [
  "serde",
 ]
@@ -4758,7 +4758,7 @@ dependencies = [
 [[package]]
 name = "spend-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/spendability-pir.git?rev=bd5ef155bc84d0e25c6a14df31d470d16fc20aeb#bd5ef155bc84d0e25c6a14df31d470d16fc20aeb"
+source = "git+https://github.com/valargroup/spendability-pir.git?rev=3b33092a2988cfdd28edd65837b9ad03b0003fd1#3b33092a2988cfdd28edd65837b9ad03b0003fd1"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -4773,7 +4773,7 @@ dependencies = [
 [[package]]
 name = "spend-types"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/spendability-pir.git?rev=bd5ef155bc84d0e25c6a14df31d470d16fc20aeb#bd5ef155bc84d0e25c6a14df31d470d16fc20aeb"
+source = "git+https://github.com/valargroup/spendability-pir.git?rev=3b33092a2988cfdd28edd65837b9ad03b0003fd1#3b33092a2988cfdd28edd65837b9ad03b0003fd1"
 dependencies = [
  "pir-types",
  "serde",
@@ -7250,7 +7250,7 @@ dependencies = [
 [[package]]
 name = "witness-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/spendability-pir.git?rev=bd5ef155bc84d0e25c6a14df31d470d16fc20aeb#bd5ef155bc84d0e25c6a14df31d470d16fc20aeb"
+source = "git+https://github.com/valargroup/spendability-pir.git?rev=3b33092a2988cfdd28edd65837b9ad03b0003fd1#3b33092a2988cfdd28edd65837b9ad03b0003fd1"
 dependencies = [
  "incrementalmerkletree",
  "orchard 0.12.0",
@@ -7268,7 +7268,7 @@ dependencies = [
 [[package]]
 name = "witness-types"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/spendability-pir.git?rev=bd5ef155bc84d0e25c6a14df31d470d16fc20aeb#bd5ef155bc84d0e25c6a14df31d470d16fc20aeb"
+source = "git+https://github.com/valargroup/spendability-pir.git?rev=3b33092a2988cfdd28edd65837b9ad03b0003fd1#3b33092a2988cfdd28edd65837b9ad03b0003fd1"
 dependencies = [
  "pir-types",
  "serde",
