@@ -447,6 +447,19 @@ protocol ZcashRustBackendWelding {
     /// Each entry marks the note as checked; spent entries also set `is_spent = 1`.
     func markProvisionalPIRResults(_ results: [PIRProvisionalResult]) async throws
 
+    /// Atomically applies a canonical PIR round: marks notes spent, trial-decrypts
+    /// compact blocks for change discovery, sets spending tx metadata, and inserts
+    /// provisional notes — all inside a single DB transaction.
+    func applyPIRCanonicalRound(_ entries: [PIRCanonicalRoundEntry]) async throws -> [[PIRDiscoveredNote]]
+
+    /// Atomically applies a provisional PIR round: marks provisional notes as
+    /// checked, trial-decrypts blocks for deeper change discovery, sets spending tx
+    /// metadata, and inserts new provisional notes — all in one DB transaction.
+    func applyPIRProvisionalRound(_ entries: [PIRProvisionalRoundEntry]) async throws -> [[PIRDiscoveredNote]]
+
+    /// Deletes all rows from `pir_notes`, resetting PIR state. Returns the number of rows deleted.
+    func resetPIRState() async throws -> UInt64
+
     // MARK: - Witness PIR (serialized through @DBActor, no standalone connections)
 
     /// Returns Orchard notes that need a PIR witness: they have a tree position

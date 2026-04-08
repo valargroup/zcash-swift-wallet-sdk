@@ -563,6 +563,11 @@ public protocol Synchronizer: AnyObject {
 
     /// Returns notes that have PIR witnesses and are still unspent.
     func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote]
+
+    /// Deletes all PIR state (`pir_notes` table) so the next spendability check
+    /// rediscovers everything from scratch. Returns the number of rows deleted.
+    @discardableResult
+    func resetPIRState() async throws -> UInt64
 }
 
 public enum SyncStatus: Equatable {

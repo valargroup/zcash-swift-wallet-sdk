@@ -1429,6 +1429,65 @@ struct ZcashRustBackend: ZcashRustBackendWelding {
     }
 
     @DBActor
+    func applyPIRCanonicalRound(_ entries: [PIRCanonicalRoundEntry]) async throws -> [[PIRDiscoveredNote]] {
+        let jsonData = try JSONEncoder().encode(entries)
+        let ptr = jsonData.withUnsafeBytes { buf in
+            zcashlc_apply_pir_canonical_round(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count)
+            )
+        }
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`applyPIRCanonicalRound` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([[PIRDiscoveredNote]].self, from: data)
+    }
+
+    @DBActor
+    func applyPIRProvisionalRound(_ entries: [PIRProvisionalRoundEntry]) async throws -> [[PIRDiscoveredNote]] {
+        let jsonData = try JSONEncoder().encode(entries)
+        let ptr = jsonData.withUnsafeBytes { buf in
+            zcashlc_apply_pir_provisional_round(
+                dbData.0,
+                dbData.1,
+                networkType.networkId,
+                buf.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                UInt(buf.count)
+            )
+        }
+
+        guard let ptr else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`applyPIRProvisionalRound` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+
+        let data = Data(bytes: ptr.pointee.ptr, count: Int(ptr.pointee.len))
+        return try JSONDecoder().decode([[PIRDiscoveredNote]].self, from: data)
+    }
+
+    @DBActor
+    func resetPIRState() async throws -> UInt64 {
+        let result = zcashlc_reset_pir_state(dbData.0, dbData.1, networkType.networkId)
+        guard result >= 0 else {
+            throw SpendabilityBackendError.rustError(
+                lastErrorMessage(fallback: "`resetPIRState` failed")
+            )
+        }
+        return UInt64(result)
+    }
+
+    @DBActor
     func markProvisionalNoteWitnessed(
         noteId: Int64,
         siblings: Data,

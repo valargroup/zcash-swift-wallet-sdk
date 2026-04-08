@@ -4142,6 +4142,63 @@ class ZcashRustBackendWeldingMock: ZcashRustBackendWelding {
         }
     }
 
+    // MARK: - applyPIRCanonicalRound
+
+    var applyPIRCanonicalRoundThrowableError: Error?
+    var applyPIRCanonicalRoundCallsCount = 0
+    var applyPIRCanonicalRoundReturnValue: [[PIRDiscoveredNote]] = []
+    var applyPIRCanonicalRoundClosure: (([PIRCanonicalRoundEntry]) async throws -> [[PIRDiscoveredNote]])?
+
+    func applyPIRCanonicalRound(_ entries: [PIRCanonicalRoundEntry]) async throws -> [[PIRDiscoveredNote]] {
+        if let error = applyPIRCanonicalRoundThrowableError {
+            throw error
+        }
+        applyPIRCanonicalRoundCallsCount += 1
+        if let closure = applyPIRCanonicalRoundClosure {
+            return try await closure(entries)
+        } else {
+            return applyPIRCanonicalRoundReturnValue
+        }
+    }
+
+    // MARK: - applyPIRProvisionalRound
+
+    var applyPIRProvisionalRoundThrowableError: Error?
+    var applyPIRProvisionalRoundCallsCount = 0
+    var applyPIRProvisionalRoundReturnValue: [[PIRDiscoveredNote]] = []
+    var applyPIRProvisionalRoundClosure: (([PIRProvisionalRoundEntry]) async throws -> [[PIRDiscoveredNote]])?
+
+    func applyPIRProvisionalRound(_ entries: [PIRProvisionalRoundEntry]) async throws -> [[PIRDiscoveredNote]] {
+        if let error = applyPIRProvisionalRoundThrowableError {
+            throw error
+        }
+        applyPIRProvisionalRoundCallsCount += 1
+        if let closure = applyPIRProvisionalRoundClosure {
+            return try await closure(entries)
+        } else {
+            return applyPIRProvisionalRoundReturnValue
+        }
+    }
+
+    // MARK: - resetPIRState
+
+    var resetPIRStateThrowableError: Error?
+    var resetPIRStateCallsCount = 0
+    var resetPIRStateReturnValue: UInt64 = 0
+    var resetPIRStateClosure: (() async throws -> UInt64)?
+
+    func resetPIRState() async throws -> UInt64 {
+        if let error = resetPIRStateThrowableError {
+            throw error
+        }
+        resetPIRStateCallsCount += 1
+        if let closure = resetPIRStateClosure {
+            return try await closure()
+        } else {
+            return resetPIRStateReturnValue
+        }
+    }
+
     // MARK: - markProvisionalNoteWitnessed
 
     var markProvisionalNoteWitnessedThrowableError: Error?

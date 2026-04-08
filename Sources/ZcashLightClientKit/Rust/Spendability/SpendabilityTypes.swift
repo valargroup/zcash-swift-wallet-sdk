@@ -164,6 +164,79 @@ public struct PIRProvisionalResult: Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - Atomic round inputs
+
+/// Input for the atomic canonical PIR round FFI call. Each entry corresponds to
+/// a canonical note whose nullifier was found spent by PIR, plus the compact block
+/// containing the spending transaction (for trial decryption inside Rust).
+public struct PIRCanonicalRoundEntry: Codable, Sendable, Equatable {
+    public let noteId: Int64
+    public let compactBlockHex: String
+    public let firstOutputPosition: UInt32
+    public let actionCount: UInt8
+    public let spendHeight: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case noteId = "note_id"
+        case compactBlockHex = "compact_block_hex"
+        case firstOutputPosition = "first_output_position"
+        case actionCount = "action_count"
+        case spendHeight = "spend_height"
+    }
+
+    public init(noteId: Int64, compactBlockHex: String, firstOutputPosition: UInt32, actionCount: UInt8, spendHeight: UInt32) {
+        self.noteId = noteId
+        self.compactBlockHex = compactBlockHex
+        self.firstOutputPosition = firstOutputPosition
+        self.actionCount = actionCount
+        self.spendHeight = spendHeight
+    }
+}
+
+/// Input for the atomic provisional PIR round FFI call. Each entry corresponds to
+/// a provisional note that was PIR-checked (spent or not-spent).
+public struct PIRProvisionalRoundEntry: Codable, Sendable, Equatable {
+    public let noteId: Int64
+    public let isSpent: Bool
+    public let compactBlockHex: String?
+    public let firstOutputPosition: UInt32?
+    public let actionCount: UInt8?
+    public let spendHeight: UInt32?
+    public let spentNoteId: Int64
+    public let depth: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case noteId = "note_id"
+        case isSpent = "is_spent"
+        case compactBlockHex = "compact_block_hex"
+        case firstOutputPosition = "first_output_position"
+        case actionCount = "action_count"
+        case spendHeight = "spend_height"
+        case spentNoteId = "spent_note_id"
+        case depth
+    }
+
+    public init(
+        noteId: Int64,
+        isSpent: Bool,
+        compactBlockHex: String?,
+        firstOutputPosition: UInt32?,
+        actionCount: UInt8?,
+        spendHeight: UInt32?,
+        spentNoteId: Int64,
+        depth: UInt32
+    ) {
+        self.noteId = noteId
+        self.isSpent = isSpent
+        self.compactBlockHex = compactBlockHex
+        self.firstOutputPosition = firstOutputPosition
+        self.actionCount = actionCount
+        self.spendHeight = spendHeight
+        self.spentNoteId = spentNoteId
+        self.depth = depth
+    }
+}
+
 // MARK: - Activity entry (PIR-derived transaction)
 
 /// A PIR-derived transaction entry for the activity view. Represents a spending

@@ -4263,6 +4263,32 @@ pub unsafe extern "C" fn zcashlc_get_pir_activity_entries(
     unwrap_exc_or_null(res)
 }
 
+/// Deletes all rows from `pir_notes`, resetting PIR state to a clean slate.
+///
+/// Returns the number of rows deleted, or -1 on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and point to a path-encoded byte array of length `db_data_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_reset_pir_state(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+) -> i64 {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+
+        let deleted = db_data
+            .reset_pir_state()
+            .map_err(|e| anyhow!("failed to reset PIR state: {e}"))?;
+
+        Ok(deleted as i64)
+    });
+    unwrap_exc_or(res, -1)
+}
+
 // ---------------------------------------------------------------------------
 // Witness PIR FFI — DB-touching operations for PIR note commitment witnesses.
 // ---------------------------------------------------------------------------
@@ -4709,11 +4735,12 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
             depth,
         );
 
+        let parent_pir_id = match parent_prov {
+            Some(prov_id) => Some(prov_id),
+            None => db_data.get_pir_note_id_for_canonical(spent_note_id)?,
+        };
+
         if let Some(ref meta) = extracted.metadata {
-            let parent_pir_id = match parent_prov {
-                Some(prov_id) => Some(prov_id),
-                None => db_data.get_pir_note_id_for_canonical(spent_note_id)?,
-            };
             if let Some(pir_id) = parent_pir_id {
                 db_data.set_pir_spending_tx_metadata(
                     pir_id,
@@ -4745,7 +4772,7 @@ pub unsafe extern "C" fn zcashlc_discover_change_notes(
                 &note.cmx,
                 spend_height,
                 depth,
-                parent_prov,
+                parent_pir_id,
             )?;
             results.push(DiscoveredNoteResult {
                 position: note.position,
@@ -4846,6 +4873,332 @@ pub unsafe extern "C" fn zcashlc_mark_provisional_pir_results(
         Ok(0i32)
     });
     unwrap_exc_or(res, -1)
+}
+
+/// Atomically applies a canonical PIR round: marks notes spent, discovers change
+/// notes via trial decryption, sets spending tx metadata, and inserts provisional
+/// notes — all inside a single SAVEPOINT.
+///
+/// All network I/O (nullifier PIR checks, compact block downloads) must be done
+/// before calling this function. The compact block bytes for each spent note are
+/// passed inline as hex-encoded strings.
+///
+/// Input JSON:
+/// ```json
+/// [{"note_id":i64, "compact_block_hex":"...", "first_output_position":u32,
+///   "action_count":u8, "spend_height":u32}]
+/// ```
+///
+/// Returns JSON `[[{"position":u64,"value":u64,"provisional_note_id":i64}]]`
+/// (one inner array per spent note).
+///
+/// Returns null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `entries_json` must be non-null and valid for reads for `entries_json_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_apply_pir_canonical_round(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+    entries_json: *const u8,
+    entries_json_len: usize,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let json_bytes = unsafe { slice::from_raw_parts(entries_json, entries_json_len) };
+
+        #[derive(serde::Deserialize)]
+        struct SpentNoteInput {
+            note_id: i64,
+            compact_block_hex: String,
+            first_output_position: u32,
+            action_count: u8,
+            spend_height: u32,
+        }
+
+        let inputs: Vec<SpentNoteInput> = serde_json::from_slice(json_bytes)
+            .map_err(|e| anyhow!("failed to parse canonical round JSON: {e}"))?;
+
+        use zcash_client_sqlite::wallet::pir::{
+            CanonicalSpendInput, DiscoveredNoteInput,
+        };
+
+        let mut entries = Vec::with_capacity(inputs.len());
+
+        for input in &inputs {
+            let (account_id, account_uuid) =
+                db_data.get_account_for_orchard_note(input.note_id)?;
+
+            let account = (&db_data)
+                .get_account(account_uuid)?
+                .ok_or_else(|| anyhow!("account not found for change discovery"))?;
+
+            let ufvk = account
+                .ufvk()
+                .ok_or_else(|| anyhow!("account has no UFVK for change discovery"))?;
+
+            let orchard_fvk = ufvk
+                .orchard()
+                .ok_or_else(|| anyhow!("account has no Orchard key for change discovery"))?;
+
+            let block_bytes = hex::decode(&input.compact_block_hex)
+                .map_err(|e| anyhow!("invalid hex block data: {e}"))?;
+
+            let extracted = change_discovery::extract_actions_from_block(
+                &block_bytes,
+                input.first_output_position,
+                input.action_count,
+            )?;
+
+            let discovered =
+                change_discovery::discover_notes_both_scopes(orchard_fvk, &extracted.actions);
+
+            tracing::info!(
+                count = discovered.len(),
+                first_output_position = input.first_output_position,
+                action_count = input.action_count,
+                "canonical round: discovered {} change notes for note {}",
+                discovered.len(),
+                input.note_id,
+            );
+
+            let (tx_hash, block_time, fee) = match &extracted.metadata {
+                Some(meta) => (
+                    Some(meta.tx_hash),
+                    Some(meta.block_time),
+                    if meta.fee > 0 { Some(meta.fee) } else { None },
+                ),
+                None => (None, None, None),
+            };
+
+            entries.push(CanonicalSpendInput {
+                note_id: input.note_id,
+                spend_height: input.spend_height,
+                tx_hash,
+                block_time,
+                fee,
+                account_id,
+                discovered_notes: discovered
+                    .iter()
+                    .map(|n| DiscoveredNoteInput {
+                        value: n.value,
+                        position: n.position,
+                        diversifier: n.diversifier,
+                        rseed: n.rseed,
+                        rho: n.rho,
+                        nullifier: n.nullifier,
+                        cmx: n.cmx,
+                    })
+                    .collect(),
+            });
+        }
+
+        let results = db_data.apply_canonical_round(&entries)
+            .map_err(|e| anyhow!("canonical round failed: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct NoteResult {
+            position: u64,
+            value: u64,
+            provisional_note_id: i64,
+        }
+
+        let json_results: Vec<Vec<NoteResult>> = results
+            .into_iter()
+            .map(|notes| {
+                notes
+                    .into_iter()
+                    .map(|n| NoteResult {
+                        position: n.position,
+                        value: n.value,
+                        provisional_note_id: n.provisional_note_id,
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&json_results)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
+}
+
+/// Atomically applies a provisional PIR round: marks provisional notes as checked,
+/// discovers deeper change notes via trial decryption, sets spending tx metadata,
+/// and inserts new provisional notes — all inside a single SAVEPOINT.
+///
+/// Input JSON:
+/// ```json
+/// [{"note_id":i64, "is_spent":bool, "compact_block_hex":"...",
+///   "first_output_position":u32, "action_count":u8, "spend_height":u32,
+///   "spent_note_id":i64, "depth":u32}]
+/// ```
+///
+/// For non-spent entries, `compact_block_b64` can be empty and positional fields
+/// are ignored.
+///
+/// Returns JSON `[[{"position":u64,"value":u64,"provisional_note_id":i64}]]`.
+///
+/// Returns null on error.
+///
+/// # Safety
+///
+/// - `db_data` must be non-null and valid for reads for `db_data_len` bytes.
+/// - `entries_json` must be non-null and valid for reads for `entries_json_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_apply_pir_provisional_round(
+    db_data: *const u8,
+    db_data_len: usize,
+    network_id: u32,
+    entries_json: *const u8,
+    entries_json_len: usize,
+) -> *mut ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let network = parse_network(network_id)?;
+        let db_data = unsafe { wallet_db(db_data, db_data_len, network)? };
+        let json_bytes = unsafe { slice::from_raw_parts(entries_json, entries_json_len) };
+
+        #[derive(serde::Deserialize)]
+        struct ProvisionalInput {
+            note_id: i64,
+            is_spent: bool,
+            compact_block_hex: Option<String>,
+            first_output_position: Option<u32>,
+            action_count: Option<u8>,
+            spend_height: Option<u32>,
+            spent_note_id: i64,
+            depth: u32,
+        }
+
+        let inputs: Vec<ProvisionalInput> = serde_json::from_slice(json_bytes)
+            .map_err(|e| anyhow!("failed to parse provisional round JSON: {e}"))?;
+
+        use zcash_client_sqlite::wallet::pir::{
+            ProvisionalCheckInput, DiscoveredNoteInput,
+        };
+
+        let mut entries = Vec::with_capacity(inputs.len());
+
+        for input in &inputs {
+            let mut discovered_notes = Vec::new();
+            let mut account_id = 0i64;
+            let mut tx_hash = None;
+            let mut block_time = None;
+            let mut fee = None;
+
+            if input.is_spent {
+                if let (Some(block_hex), Some(first_pos), Some(count), Some(_height)) = (
+                    &input.compact_block_hex,
+                    input.first_output_position,
+                    input.action_count,
+                    input.spend_height,
+                ) {
+                    if !block_hex.is_empty() {
+                        let (acct_id, account_uuid) =
+                            db_data.get_account_for_orchard_note(input.spent_note_id)?;
+                        account_id = acct_id;
+
+                        let account = (&db_data)
+                            .get_account(account_uuid)?
+                            .ok_or_else(|| anyhow!("account not found for change discovery"))?;
+
+                        let ufvk = account
+                            .ufvk()
+                            .ok_or_else(|| anyhow!("account has no UFVK"))?;
+
+                        let orchard_fvk = ufvk
+                            .orchard()
+                            .ok_or_else(|| anyhow!("account has no Orchard key"))?;
+
+                        let block_bytes = hex::decode(block_hex)
+                            .map_err(|e| anyhow!("invalid hex block data: {e}"))?;
+
+                        let extracted = change_discovery::extract_actions_from_block(
+                            &block_bytes,
+                            first_pos,
+                            count,
+                        )?;
+
+                        let discovered = change_discovery::discover_notes_both_scopes(
+                            orchard_fvk,
+                            &extracted.actions,
+                        );
+
+                        tracing::info!(
+                            count = discovered.len(),
+                            depth = input.depth,
+                            "provisional round: discovered {} change notes at depth {}",
+                            discovered.len(),
+                            input.depth + 1,
+                        );
+
+                        if let Some(ref meta) = extracted.metadata {
+                            tx_hash = Some(meta.tx_hash);
+                            block_time = Some(meta.block_time);
+                            fee = if meta.fee > 0 { Some(meta.fee) } else { None };
+                        }
+
+                        discovered_notes = discovered
+                            .iter()
+                            .map(|n| DiscoveredNoteInput {
+                                value: n.value,
+                                position: n.position,
+                                diversifier: n.diversifier,
+                                rseed: n.rseed,
+                                rho: n.rho,
+                                nullifier: n.nullifier,
+                                cmx: n.cmx,
+                            })
+                            .collect();
+                    }
+                }
+            }
+
+            entries.push(ProvisionalCheckInput {
+                note_id: input.note_id,
+                is_spent: input.is_spent,
+                spend_height: input.spend_height,
+                tx_hash,
+                block_time,
+                fee,
+                account_id,
+                depth: input.depth,
+                discovered_notes,
+            });
+        }
+
+        let results = db_data.apply_provisional_round(&entries)
+            .map_err(|e| anyhow!("provisional round failed: {e}"))?;
+
+        #[derive(serde::Serialize)]
+        struct NoteResult {
+            position: u64,
+            value: u64,
+            provisional_note_id: i64,
+        }
+
+        let json_results: Vec<Vec<NoteResult>> = results
+            .into_iter()
+            .map(|notes| {
+                notes
+                    .into_iter()
+                    .map(|n| NoteResult {
+                        position: n.position,
+                        value: n.value,
+                        provisional_note_id: n.provisional_note_id,
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let json = serde_json::to_vec(&json_results)?;
+        Ok(ffi::BoxedSlice::some(json))
+    });
+    unwrap_exc_or_null(res)
 }
 
 /// Marks a provisional note as witnessed after a PIR witness is obtained,

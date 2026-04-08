@@ -1141,7 +1141,6 @@ public class SDKSynchronizer: Synchronizer {
         progress: SpendabilityProgressHandler?,
         maxDepth: Int = 20
     ) async throws -> SpendabilityResult {
-        // Phase 1: Check canonical unspent notes
         let notes = try await initializer.rustBackend.getUnspentOrchardNotesForPIR()
         guard !notes.isEmpty else {
             return SpendabilityResult(earliestHeight: 0, latestHeight: 0, spentNoteIds: [], totalSpentValue: 0)
@@ -1160,32 +1159,47 @@ public class SDKSynchronizer: Synchronizer {
         let spentNoteIds = spentNotes.map(\.0.id)
         let totalSpentValue = spentNotes.map(\.0.value).reduce(0, +)
 
-        if !spentNoteIds.isEmpty {
-            try await initializer.rustBackend.insertPIRSpentNotes(spentNoteIds)
-        }
+        // Phase 1: Pre-download all compact blocks, then apply everything atomically.
+        // Notes whose block download fails are excluded from this round — they stay
+        // "unspent" in the DB and will be retried on the next checkWalletSpendability call.
+        if !spentNotes.isEmpty {
+            let service = initializer.lightWalletService
+            let mode = await sdkFlags.ifTor(.uniqueTor)
 
-        // Depth-1 change discovery for canonical spent notes
-        let service = initializer.lightWalletService
-        let mode = await sdkFlags.ifTor(.uniqueTor)
-        for (note, metadata) in spentNotes {
-            await discoverChangeAtDepth(
-                service: service,
-                mode: mode,
-                spentNoteId: note.id,
-                metadata: metadata,
-                depth: 1,
-                parentProvisionalId: nil
-            )
+            var roundEntries: [PIRCanonicalRoundEntry] = []
+            for (note, metadata) in spentNotes {
+                guard let blockHex = await downloadCompactBlockHex(
+                    service: service, mode: mode, height: BlockHeight(metadata.spendHeight)
+                ) else {
+                    logger.warn("Skipping canonical note \(note.id): block download failed at height \(metadata.spendHeight)")
+                    continue
+                }
+                roundEntries.append(PIRCanonicalRoundEntry(
+                    noteId: note.id,
+                    compactBlockHex: blockHex,
+                    firstOutputPosition: metadata.firstOutputPosition,
+                    actionCount: metadata.actionCount,
+                    spendHeight: metadata.spendHeight
+                ))
+            }
+
+            if !roundEntries.isEmpty {
+                let results = try await initializer.rustBackend.applyPIRCanonicalRound(roundEntries)
+                let totalDiscovered = results.reduce(0) { $0 + $1.count }
+                if totalDiscovered > 0 {
+                    logger.info("Canonical round: discovered \(totalDiscovered) change note(s)")
+                }
+            }
         }
 
         // Phase 2: Recursive discovery of deeper provisional notes.
-        // Each iteration PIR-checks all unchecked provisionals and discovers
-        // the next depth level. Capped at maxDepth iterations as a safety limit.
+        let service = initializer.lightWalletService
+        let mode = await sdkFlags.ifTor(.uniqueTor)
+
         for _ in 0..<maxDepth {
             let unchecked = try await initializer.rustBackend.getProvisionalNotesForPIR()
             guard !unchecked.isEmpty else { break }
 
-            // Convert to PIRUnspentNote for the PIR client (same nf/value shape)
             let notesForPIR = unchecked.map {
                 PIRUnspentNote(id: $0.id, nf: $0.nf, value: $0.value)
             }
@@ -1198,24 +1212,42 @@ public class SDKSynchronizer: Synchronizer {
                 )
             }.value
 
-            let provisionalResults: [PIRProvisionalResult] = zip(unchecked, pirResult.spent)
-                .map { note, meta in PIRProvisionalResult(id: note.id, spent: meta != nil) }
-            try await initializer.rustBackend.markProvisionalPIRResults(provisionalResults)
-
             let spentProvisionals: [(PIRProvisionalNote, PIRSpendMetadata)] = zip(unchecked, pirResult.spent)
                 .compactMap { note, meta in meta.map { (note, $0) } }
-            guard !spentProvisionals.isEmpty else { break }
 
-            for (provisional, metadata) in spentProvisionals {
-                await discoverChangeAtDepth(
-                    service: service,
-                    mode: mode,
-                    spentNoteId: provisional.spentNoteId,
-                    metadata: metadata,
-                    depth: provisional.depth + 1,
-                    parentProvisionalId: provisional.id
-                )
+            var roundEntries: [PIRProvisionalRoundEntry] = []
+            for (note, metaOpt) in zip(unchecked, pirResult.spent) {
+                let isSpent = metaOpt != nil
+                var blockHex: String?
+
+                if isSpent, let metadata = metaOpt {
+                    blockHex = await downloadCompactBlockHex(
+                        service: service, mode: mode, height: BlockHeight(metadata.spendHeight)
+                    )
+                    if blockHex == nil {
+                        logger.warn("Provisional note \(note.id): block download failed at height \(metadata.spendHeight), marking spent without change discovery")
+                    }
+                }
+
+                roundEntries.append(PIRProvisionalRoundEntry(
+                    noteId: note.id,
+                    isSpent: isSpent,
+                    compactBlockHex: blockHex,
+                    firstOutputPosition: metaOpt?.firstOutputPosition,
+                    actionCount: metaOpt?.actionCount,
+                    spendHeight: metaOpt?.spendHeight,
+                    spentNoteId: note.spentNoteId,
+                    depth: note.depth
+                ))
             }
+
+            let results = try await initializer.rustBackend.applyPIRProvisionalRound(roundEntries)
+            let totalDiscovered = results.reduce(0) { $0 + $1.count }
+            if totalDiscovered > 0 {
+                logger.info("Provisional round: discovered \(totalDiscovered) change note(s)")
+            }
+
+            guard !spentProvisionals.isEmpty else { break }
         }
 
         return SpendabilityResult(
@@ -1226,43 +1258,26 @@ public class SDKSynchronizer: Synchronizer {
         )
     }
 
-    /// Fetches a compact block and trial-decrypts it to discover change notes
-    /// at a given depth in the spend chain.
-    // swiftlint:disable:next function_parameter_count
-    private func discoverChangeAtDepth(
+    /// Downloads a compact block at a given height, returning its bytes as a hex string
+    /// for passing through the JSON FFI. Returns nil on failure (logged as warning).
+    private func downloadCompactBlockHex(
         service: LightWalletService,
         mode: ServiceMode,
-        spentNoteId: Int64,
-        metadata: PIRSpendMetadata,
-        depth: UInt32,
-        parentProvisionalId: Int64?
-    ) async {
-        let height = BlockHeight(metadata.spendHeight)
+        height: BlockHeight
+    ) async -> String? {
         do {
             var blockData: Data?
             for try await block in try service.blockRange(height...height, mode: mode) {
                 blockData = block.data
             }
-            guard let compactBlockBytes = blockData else {
-                logger.warn("Change discovery depth \(depth): no block at height \(height)")
-                return
+            guard let data = blockData else {
+                logger.warn("Block download: no block at height \(height)")
+                return nil
             }
-
-            let discovered = try await initializer.rustBackend.discoverChangeNotes(
-                spentNoteId: spentNoteId,
-                compactBlockBytes: compactBlockBytes,
-                firstOutputPosition: metadata.firstOutputPosition,
-                actionCount: metadata.actionCount,
-                spendHeight: metadata.spendHeight,
-                depth: depth,
-                parentProvisionalId: parentProvisionalId
-            )
-
-            if !discovered.isEmpty {
-                logger.info("Change discovery depth \(depth): found \(discovered.count) note(s) at height \(height)")
-            }
+            return data.map { String(format: "%02x", $0) }.joined()
         } catch {
-            logger.warn("Change discovery depth \(depth) failed at height \(height): \(error)")
+            logger.warn("Block download failed at height \(height): \(error)")
+            return nil
         }
     }
 
@@ -1374,6 +1389,11 @@ public class SDKSynchronizer: Synchronizer {
 
     public func getPIRWitnessedNotes() async throws -> [PIRWitnessedNote] {
         try await initializer.rustBackend.getPIRWitnessedNotes()
+    }
+
+    @discardableResult
+    public func resetPIRState() async throws -> UInt64 {
+        try await initializer.rustBackend.resetPIRState()
     }
 
     // Fetches fresh PIR witnesses for all Orchard notes in the proposal and
