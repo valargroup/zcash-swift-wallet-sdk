@@ -1108,8 +1108,8 @@ pub unsafe extern "C" fn zcashlc_voting_get_wallet_notes(
 
         let height = zcash_protocol::consensus::BlockHeight::from_u32(snapshot_height as u32);
         let received_notes = wallet_db
-            .get_orchard_notes_at_snapshot(account_uuid, height)
-            .map_err(|e| anyhow!("get_orchard_notes_at_snapshot failed: {}", e))?;
+            .get_orchard_notes_at_historical_height(account_uuid, height)
+            .map_err(|e| anyhow!("get_orchard_notes_at_historical_height failed: {}", e))?;
 
         let mut json_notes = Vec::with_capacity(received_notes.len());
         for rn in &received_notes {
@@ -1381,11 +1381,11 @@ pub unsafe extern "C" fn zcashlc_voting_generate_note_witnesses(
             .iter()
             .map(|n| Position::from(n.position))
             .collect();
-        let checkpoint_height = zcash_protocol::consensus::BlockHeight::from_u32(params.snapshot_height as u32);
+        let historical_height = zcash_protocol::consensus::BlockHeight::from_u32(params.snapshot_height as u32);
 
         let merkle_paths = wallet_db
-            .generate_orchard_witnesses_at_frontier(&positions, nonempty_frontier, checkpoint_height)
-            .map_err(|e| anyhow!("generate_orchard_witnesses_at_frontier failed: {}", e))?;
+            .generate_orchard_witnesses_at_historical_height(&positions, nonempty_frontier, historical_height)
+            .map_err(|e| anyhow!("generate_orchard_witnesses_at_historical_height failed: {}", e))?;
 
         // Convert MerklePaths to WitnessData
         let root_bytes = frontier_root.to_bytes().to_vec();
