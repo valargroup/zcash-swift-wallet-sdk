@@ -48,6 +48,8 @@ anyhow = "1.0"
 ffi_helpers = "0.3"
 uuid = "1.1"
 bitflags = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # HTTP
 bytes = "1"
@@ -75,6 +77,13 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 # - The "static" feature is required for the "compression" default feature of arti-client.
 xz2 = { version = "0.1", features = ["static"] }
 
+# Voting
+# TODO: version constraints need updating once voting-circuits fork is rebased onto orchard 0.12
+librustvoting = { git = "https://github.com/valargroup/librustvoting.git", rev = "126c11d354c28de257d75558f0d88bcee0f2e0d0" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git" }
+zcash_keys = { version = "0.12", features = ["orchard"] }
+incrementalmerkletree = { version = "0.8", default-features = false }
+
 [build-dependencies]
 bindgen = "0.72"
 cbindgen = "0.29"
@@ -88,15 +97,26 @@ crate-type = ["staticlib"]
 [profile.release]
 lto = true
 
+# Patches to align librustvoting's dependencies with the SDK's.
+# orchard: voting-circuits fork (upstream orchard + pub visibility for
+#   constants/spec + shared_primitives gadget for voting ZKPs).
+# librustzcash crates: governance extensions branch with PCZT/key
+#   visibility changes needed for voting delegation flows.
+#
+# TODO: These rev pins need updating once:
+#   - voting-circuits fork is rebased onto orchard 0.12
+#   - valargroup/librustzcash shielded-vote-main (PR #34) lands
 [patch.crates-io]
-pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }
+orchard = { git = "https://github.com/valargroup/voting-circuits.git" }
 sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4f95c2286dbe90f05e6f44d634bc2924b992fab4" }
-transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
+# librustzcash crates pinned by rev to shielded-voting-wallet-support HEAD (7c8c8b0).
+pczt              = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_keys        = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_protocol    = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_address     = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_encoding    = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_transparent = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_primitives  = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+zcash_proofs      = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
