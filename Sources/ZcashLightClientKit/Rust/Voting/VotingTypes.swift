@@ -102,10 +102,10 @@ public struct VotingNoteInfo: Codable, Sendable {
     }
 }
 
-// MARK: - Governance PCZT (JSON)
+// MARK: - Voting PCZT (JSON)
 
-/// Result of building a governance PCZT.
-public struct VotingGovernancePczt: Codable, Sendable {
+/// Result of building a voting PCZT.
+public struct VotingPczt: Codable, Sendable {
     public let pcztBytes: [UInt8]
     // swiftlint:disable:next identifier_name
     public let rk: [UInt8]

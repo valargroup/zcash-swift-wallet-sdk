@@ -416,9 +416,9 @@ extension VotingRustBackend {
         return UInt32(result)
     }
 
-    /// Build a governance PCZT for a bundle.
+    /// Build a voting PCZT for a bundle.
     // swiftlint:disable:next function_parameter_count
-    public func buildGovernancePczt(
+    public func buildVotingPczt(
         roundId: String,
         bundleIndex: UInt32,
         notes: [VotingNoteInfo],
@@ -430,7 +430,7 @@ extension VotingRustBackend {
         accountIndex: UInt32,
         roundName: String,
         addressIndex: UInt32
-    ) throws -> VotingGovernancePczt {
+    ) throws -> VotingPczt {
         let dbh = try requireHandle()
         let roundIdBytes = [UInt8](roundId.utf8)
         let notesJson = try JSONEncoder().encode(notes)
@@ -442,7 +442,7 @@ extension VotingRustBackend {
                     hotkeyRawAddress.withUnsafeBufferPointer { hkBuf in
                         seedFingerprint.withUnsafeBufferPointer { sfBuf in
                             roundNameBytes.withUnsafeBufferPointer { rnBuf in
-                                zcashlc_voting_build_governance_pczt(
+                                zcashlc_voting_build_pczt(
                                     dbh,
                                     ridBuf.baseAddress,
                                     UInt(ridBuf.count),
@@ -470,7 +470,7 @@ extension VotingRustBackend {
         }
 
         guard let ptr else {
-            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`build_governance_pczt` failed"))
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`build_voting_pczt` failed"))
         }
         defer { zcashlc_free_boxed_slice(ptr) }
         return try decodeJSON(from: ptr)

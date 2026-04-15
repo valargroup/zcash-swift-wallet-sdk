@@ -186,9 +186,9 @@ impl From<voting::NoteInfo> for JsonNoteInfo {
     }
 }
 
-/// JSON-serializable GovernancePczt.
+/// JSON-serializable VotingPczt.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct JsonGovernancePczt {
+pub struct JsonVotingPczt {
     pub pczt_bytes: Vec<u8>,
     pub rk: Vec<u8>,
     pub alpha: Vec<u8>,
@@ -209,7 +209,7 @@ pub struct JsonGovernancePczt {
     pub pczt_sighash: Vec<u8>,
 }
 
-impl From<voting::GovernancePczt> for JsonGovernancePczt {
+impl From<voting::GovernancePczt> for JsonVotingPczt {
     fn from(g: voting::GovernancePczt) -> Self {
         Self {
             pczt_bytes: g.pczt_bytes,
@@ -1226,18 +1226,18 @@ pub unsafe extern "C" fn zcashlc_voting_get_bundle_count(
     unwrap_exc_or(res, -1)
 }
 
-/// Build a governance PCZT for a bundle.
+/// Build a voting PCZT for a bundle.
 ///
 /// `notes_json` is a JSON-encoded `Vec<NoteInfo>`.
 ///
-/// Returns JSON-encoded `GovernancePczt` as `*mut FfiBoxedSlice`, or null on error.
+/// Returns JSON-encoded `VotingPczt` as `*mut FfiBoxedSlice`, or null on error.
 ///
 /// # Safety
 ///
 /// - `db` must be a valid, non-null `VotingDatabaseHandle` pointer.
 /// - All pointer/length pairs must be valid.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn zcashlc_voting_build_governance_pczt(
+pub unsafe extern "C" fn zcashlc_voting_build_pczt(
     db: *mut VotingDatabaseHandle,
     round_id: *const u8,
     round_id_len: usize,
@@ -1288,9 +1288,9 @@ pub unsafe extern "C" fn zcashlc_voting_build_governance_pczt(
                 &round_name_str,
                 address_index,
             )
-            .map_err(|e| anyhow!("build_governance_pczt failed: {}", e))?;
+            .map_err(|e| anyhow!("build_voting_pczt failed: {}", e))?;
 
-        let json_pczt: JsonGovernancePczt = pczt.into();
+        let json_pczt: JsonVotingPczt = pczt.into();
         json_to_boxed_slice(&json_pczt)
     });
     unwrap_exc_or_null(res)

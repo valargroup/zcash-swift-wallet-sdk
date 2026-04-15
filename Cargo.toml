@@ -100,7 +100,7 @@ lto = true
 # Patches to align librustvoting's dependencies with the SDK's.
 # orchard: voting-circuits fork (upstream orchard + pub visibility for
 #   constants/spec + shared_primitives gadget for voting ZKPs).
-# librustzcash crates: governance extensions branch with PCZT/key
+# librustzcash crates: shielded voting extensions branch with PCZT/key
 #   visibility changes needed for voting delegation flows.
 #
 # TODO: These rev pins need updating once:
