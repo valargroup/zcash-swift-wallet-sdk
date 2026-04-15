@@ -98,15 +98,21 @@ crate-type = ["staticlib"]
 [profile.release]
 lto = true
 
+# Patches to align zcash_voting's dependencies with the SDK's.
+# orchard: voting-circuits fork (upstream orchard + pub visibility for
+#   constants/spec + shared_primitives gadget for voting ZKPs).
+# librustzcash crates: shielded voting extensions branch with PCZT/key
+#   visibility changes needed for voting delegation flows.
 [patch.crates-io]
-pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }
+orchard = { git = "https://github.com/valargroup/voting-circuits.git", branch = "greg/orchard-0.12" }
 sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4f95c2286dbe90f05e6f44d634bc2924b992fab4" }
-transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
+pczt = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_keys = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_protocol = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_address = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_encoding = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_transparent = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_client_sqlite = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_primitives = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
+zcash_proofs = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-for-zodl-3.4.0" }
