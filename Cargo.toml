@@ -78,9 +78,7 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 xz2 = { version = "0.1", features = ["static"] }
 
 # Voting
-# TODO: version constraints need updating once voting-circuits fork is rebased onto orchard 0.12
-librustvoting = { git = "https://github.com/valargroup/librustvoting.git", rev = "126c11d354c28de257d75558f0d88bcee0f2e0d0" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git" }
+librustvoting = { git = "https://github.com/valargroup/librustvoting.git", branch = "greg/orchard-0.12" }
 zcash_keys = { version = "0.12", features = ["orchard"] }
 incrementalmerkletree = { version = "0.8", default-features = false }
 
@@ -102,21 +100,16 @@ lto = true
 #   constants/spec + shared_primitives gadget for voting ZKPs).
 # librustzcash crates: shielded voting extensions branch with PCZT/key
 #   visibility changes needed for voting delegation flows.
-#
-# TODO: These rev pins need updating once:
-#   - voting-circuits fork is rebased onto orchard 0.12
-#   - valargroup/librustzcash shielded-vote-main (PR #34) lands
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/voting-circuits.git" }
+orchard = { git = "https://github.com/valargroup/voting-circuits.git", branch = "greg/orchard-0.12" }
 sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4f95c2286dbe90f05e6f44d634bc2924b992fab4" }
-# librustzcash crates pinned by rev to shielded-voting-wallet-support HEAD (7c8c8b0).
-pczt              = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_keys        = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_protocol    = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_address     = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_encoding    = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_transparent = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_primitives  = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
-zcash_proofs      = { git = "https://github.com/valargroup/librustzcash.git", rev = "7c8c8b0e0ce6769a4b58ea96d97fb78b9d98e1fc" }
+pczt              = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_keys        = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_protocol    = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_address     = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_encoding    = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_transparent = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_client_sqlite  = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_primitives  = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
+zcash_proofs      = { git = "https://github.com/valargroup/librustzcash.git", branch = "shielded-vote-main" }
