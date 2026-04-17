@@ -78,7 +78,7 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 xz2 = { version = "0.1", features = ["static"] }
 
 # Voting
-librustvoting = { git = "https://github.com/valargroup/librustvoting.git", branch = "greg/orchard-0.12" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "greg/orchard-0.12" }
 zcash_keys = { version = "0.12", features = ["orchard"] }
 incrementalmerkletree = { version = "0.8", default-features = false }
 
@@ -95,7 +95,7 @@ crate-type = ["staticlib"]
 [profile.release]
 lto = true
 
-# Patches to align librustvoting's dependencies with the SDK's.
+# Patches to align zcash_voting's dependencies with the SDK's.
 # orchard: voting-circuits fork (upstream orchard + pub visibility for
 #   constants/spec + shared_primitives gadget for voting ZKPs).
 # librustzcash crates: shielded voting extensions branch with PCZT/key
