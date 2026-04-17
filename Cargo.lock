@@ -2715,38 +2715,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "librustvoting"
-version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git?branch=greg%2Forchard-0.12#1c1579d98a4e1b5ecf9efa4c7028c162ab1bcfa2"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "halo2_gadgets 0.3.1",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "nonempty",
- "orchard",
- "pasta_curves",
- "pczt",
- "pir-client",
- "rand 0.8.5",
- "rusqlite",
- "serde",
- "serde_json",
- "subtle",
- "thiserror 2.0.17",
- "vote-commitment-tree",
- "vote-commitment-tree-client",
- "voting-circuits",
- "zcash_keys",
- "zcash_primitives",
- "zcash_protocol",
- "zip32",
-]
-
-[[package]]
 name = "libsqlite3-sys"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2773,7 +2741,6 @@ dependencies = [
  "http",
  "http-body-util",
  "incrementalmerkletree",
- "librustvoting",
  "log-panics",
  "nonempty",
  "once_cell",
@@ -2805,6 +2772,7 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_transparent",
+ "zcash_voting",
  "zip32",
 ]
 
@@ -6569,7 +6537,7 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git?branch=greg%2Forchard-0.12#1c1579d98a4e1b5ecf9efa4c7028c162ab1bcfa2"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Forchard-0.12#dfd848f9d8a967c1fef620027e47c6e8e7559cbf"
 dependencies = [
  "anyhow",
  "ff",
@@ -6585,7 +6553,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.0"
-source = "git+https://github.com/valargroup/librustvoting.git?branch=greg%2Forchard-0.12#1c1579d98a4e1b5ecf9efa4c7028c162ab1bcfa2"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Forchard-0.12#dfd848f9d8a967c1fef620027e47c6e8e7559cbf"
 dependencies = [
  "base64",
  "clap",
@@ -7476,6 +7444,38 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",
+ "zip32",
+]
+
+[[package]]
+name = "zcash_voting"
+version = "0.1.0"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Forchard-0.12#dfd848f9d8a967c1fef620027e47c6e8e7559cbf"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2_gadgets 0.3.1",
+ "halo2_proofs",
+ "hex",
+ "incrementalmerkletree",
+ "nonempty",
+ "orchard",
+ "pasta_curves",
+ "pczt",
+ "pir-client",
+ "rand 0.8.5",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "subtle",
+ "thiserror 2.0.17",
+ "vote-commitment-tree",
+ "vote-commitment-tree-client",
+ "voting-circuits",
+ "zcash_keys",
+ "zcash_primitives",
+ "zcash_protocol",
  "zip32",
 ]
 
