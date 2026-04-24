@@ -547,6 +547,31 @@ public protocol Synchronizer: AnyObject {
     func deleteAccount(_ accountUUID: AccountUUID) async throws -> Void
 }
 
+/// Error thrown by the default `Synchronizer.getTreeState(height:)` implementation
+/// when a conformer without a lightwalletd source doesn't override it. Hoisted to
+/// file scope because Swift forbids nesting concrete types with synthesized members
+/// inside a generic function — protocol-extension methods carry an implicit `Self`
+/// and so count as generic.
+private struct GetTreeStateUnimplemented: LocalizedError {
+    var errorDescription: String? {
+        """
+        Synchronizer.getTreeState(height:) has no default implementation. \
+        Override this method in your Synchronizer conformer to provide a tree-state source.
+        """
+    }
+}
+
+public extension Synchronizer {
+    /// Default implementation so adding `getTreeState(height:)` to the protocol is
+    /// not a source-breaking change for downstream conformers. Conformers that have
+    /// a lightwalletd connection (such as `SDKSynchronizer`) override this;
+    /// conformers that don't — mocks, stubs, alternate transports — fall through to
+    /// this default and report the feature as unavailable.
+    func getTreeState(height: UInt64) async throws -> Data {
+        throw GetTreeStateUnimplemented()
+    }
+}
+
 public enum SyncStatus: Equatable {
     public static func == (lhs: SyncStatus, rhs: SyncStatus) -> Bool {
         switch (lhs, rhs) {
