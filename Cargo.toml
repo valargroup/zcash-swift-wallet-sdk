@@ -99,17 +99,8 @@ crate-type = ["staticlib"]
 [profile.release]
 lto = true
 
-# orchard / voting-circuits / zcash_voting are pinned to valargroup main
-# revs as a temporary overlay until zcash/orchard PRs #489 and #495 land
-# upstream and ship in the next orchard release; once that lands and
-# voting-circuits / zcash_voting publish versions that depend on it, this
-# block goes away. librustzcash crates pin to zcash/main HEAD (rev
-# 976efa76ca) so the FFI builds against upstream librustzcash with no
-# fork in the dep graph.
 [patch.crates-io]
-orchard = { git = "https://github.com/valargroup/orchard.git", rev = "c26a6ec6860cc62bb15d208c3d790dfb616bfbe7" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "66777e27e10970c38dc1ebb93d8c7715a5b984c7" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", rev = "d351e9dc13baa623b95883e0815b194358604c54" }
+orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }
 pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
 transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
 zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
