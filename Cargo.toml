@@ -15,8 +15,8 @@ build = "rust/build.rs"
 [dependencies]
 
 # Zcash
-orchard = "0.12"
-sapling = { package = "sapling-crypto", version = "0.6", default-features = false }
+orchard = { version = "0.12.0", package = "valar-orchard" }
+sapling = { package = "sapling-crypto", version = "0.6.2", default-features = false }
 transparent = { package = "zcash_transparent", version = "0.6", default-features = false }
 zcash_address = { version = "0.10" }
 zcash_client_backend = { version = "0.21", features = [
@@ -81,7 +81,8 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 xz2 = { version = "0.1", features = ["static"] }
 
 # Voting
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "greg/orchard-0.12" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "main" }
+voting-circuits = "0.2.0"
 zcash_keys = { version = "0.12", features = ["orchard"] }
 incrementalmerkletree = { version = "0.8", default-features = false }
 
@@ -99,14 +100,22 @@ crate-type = ["staticlib"]
 lto = true
 
 [patch.crates-io]
-pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-orchard = { package = "orchard", git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "4f95c2286dbe90f05e6f44d634bc2924b992fab4" }
-transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "438657c52c7b5abd933c715e83f0289a79349c5a" }
+# librustzcash: pinned to valargroup fork containing the new
+# `TransparentOutputFilter` and `ReceiverRequirementError` APIs that the
+# SDK rust code adapts to.
+pczt = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+transparent = { package = "zcash_transparent", git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_address = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_client_sqlite = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_keys = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_primitives = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_proofs = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+zcash_protocol = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
+# sapling-crypto: bumped to match the rev required by the librustzcash fork
+# above (which transitively depends on sapling-crypto 0.6.2).
+sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "b8a81c22f034d68f9bbd6cba728aab807b9ba2ea" }
+# No `orchard` patch: both the SDK and the librustzcash fork use
+# `valar-orchard` (renamed via `package = "valar-orchard"`), which resolves
+# directly from crates.io. Patching `orchard` here would create two
+# incompatible orchard implementations in the dependency graph.
