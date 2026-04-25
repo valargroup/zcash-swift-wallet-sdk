@@ -15,10 +15,10 @@ build = "rust/build.rs"
 [dependencies]
 
 # Zcash
-orchard = { version = "0.12.0", package = "valar-orchard" }
-sapling = { package = "sapling-crypto", version = "0.6.2", default-features = false }
-transparent = { package = "zcash_transparent", version = "0.6", default-features = false }
-zcash_address = { version = "0.10" }
+orchard = "0.13"
+sapling = { package = "sapling-crypto", version = "0.7", default-features = false }
+transparent = { package = "zcash_transparent", version = "0.7", default-features = false }
+zcash_address = { version = "0.11" }
 zcash_client_backend = { version = "0.21", features = [
     "lightwalletd-tonic-tls-webpki-roots",
     "orchard",
@@ -29,9 +29,9 @@ zcash_client_backend = { version = "0.21", features = [
 ] }
 zcash_client_sqlite = { version = "0.19", features = ["orchard", "transparent-inputs", "unstable", "serde"] }
 zcash_note_encryption = "0.4.1"
-zcash_primitives = "0.26"
+zcash_primitives = "0.27"
 zcash_proofs = "0.26"
-zcash_protocol = "0.7"
+zcash_protocol = "0.8"
 zcash_script = "0.4"
 zip32 = "0.2"
 pczt = { version = "0.5", features = ["prover"] }
@@ -81,7 +81,7 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 xz2 = { version = "0.1", features = ["static"] }
 
 # Voting
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "main" }
+zcash_voting = "0.1.0"
 voting-circuits = "0.2.0"
 zcash_keys = { version = "0.12", features = ["orchard"] }
 incrementalmerkletree = { version = "0.8", default-features = false }
@@ -99,23 +99,24 @@ crate-type = ["staticlib"]
 [profile.release]
 lto = true
 
+# Migration-branch git pins. orchard / voting-circuits / zcash_voting come from
+# valargroup migration branches; librustzcash crates pin to upstream zcash/main
+# HEAD now that all governance PRs (#2283, #2284, #2281) are merged. The
+# previous valargroup/librustzcash and sapling-crypto git pins are dropped
+# because (a) the librustzcash fork is fully retired and (b) sapling-crypto
+# 0.7.0 (which `transparent`/`zcash_primitives` 0.27 expect) is now published
+# to crates.io, so no patch is needed.
 [patch.crates-io]
-# librustzcash: pinned to valargroup fork containing the new
-# `TransparentOutputFilter` and `ReceiverRequirementError` APIs that the
-# SDK rust code adapts to.
-pczt = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-transparent = { package = "zcash_transparent", git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_address = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_client_backend = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_client_sqlite = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_keys = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_primitives = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_proofs = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-zcash_protocol = { git = "https://github.com/valargroup/librustzcash.git", rev = "6534482c1cc595f38e0aaa63c4c7c4689360d766" }
-# sapling-crypto: bumped to match the rev required by the librustzcash fork
-# above (which transitively depends on sapling-crypto 0.6.2).
-sapling = { package = "sapling-crypto", git = "https://github.com/zcash/sapling-crypto.git", rev = "b8a81c22f034d68f9bbd6cba728aab807b9ba2ea" }
-# No `orchard` patch: both the SDK and the librustzcash fork use
-# `valar-orchard` (renamed via `package = "valar-orchard"`), which resolves
-# directly from crates.io. Patching `orchard` here would create two
-# incompatible orchard implementations in the dependency graph.
+orchard = { git = "https://github.com/valargroup/orchard.git", branch = "valar/0.13-spend-auth-g" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", branch = "valar/orchard-0.13" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "valar/orchard-0.13" }
+pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+transparent = { package = "zcash_transparent", git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "976efa76ca2195d693f373aeaa201a2c50b6e0ab" }
