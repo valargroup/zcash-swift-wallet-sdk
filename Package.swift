@@ -30,8 +30,8 @@ if useLocalFFI {
     targets.append(
         .binaryTarget(
             name: "libzcashlc",
-            url: "https://github.com/zcash/zcash-swift-wallet-sdk/releases/download/2.4.6/libzcashlc.xcframework.zip",
-            checksum: "18beb8387d8538100638c474b46396b7c857f2dc196e4edda027c59b8d521406"
+            url: "https://github.com/valargroup/zcash-swift-wallet-sdk/releases/download/0.8.0-voting/libzcashlc.xcframework.zip",
+            checksum: "c18b4d62704ff8973412ef0bb33eb87c639a1494e6303f40978378979728e172"
         )
     )
     sdkDependencies.append("libzcashlc")
