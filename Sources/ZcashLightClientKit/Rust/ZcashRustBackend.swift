@@ -1394,11 +1394,13 @@ extension FfiAccount {
                 keySource: key_source != nil ? String(cString: key_source) : nil,
                 seedFingerprint: nil,
                 hdAccountIndex: nil,
-                ufvk: nil
+                ufvk: nil,
+                uivk: nil
             )
         }
-        
+
         let ufvkTyped = ufvk.map { UnifiedFullViewingKey(validatedEncoding: String(cString: $0)) }
+        let uivkTyped = uivk.map { UnifiedIncomingViewingKey(validatedEncoding: String(cString: $0)) }
 
         // Valid ZIP32 account index
         return .init(
@@ -1407,7 +1409,8 @@ extension FfiAccount {
             keySource: key_source != nil ? String(cString: key_source) : nil,
             seedFingerprint: seedFingerprintArray,
             hdAccountIndex: Zip32AccountIndex(hd_account_index),
-            ufvk: ufvkTyped
+            ufvk: ufvkTyped,
+            uivk: uivkTyped
         )
     }
 }
