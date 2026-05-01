@@ -548,6 +548,7 @@ extension VotingRustBackend {
         notes: [VotingNoteInfo],
         pirEndpoints: [String],
         expectedSnapshotHeight: UInt64,
+        networkId: UInt32,
         pirResolver: PirSnapshotResolver = PirSnapshotResolver()
     ) async throws -> VotingDelegationPirPrecomputeResult {
         let pirServerUrl = try await pirResolver.resolve(
@@ -572,7 +573,8 @@ extension VotingRustBackend {
                         notesBuf.baseAddress,
                         UInt(notesBuf.count),
                         urlBuf.baseAddress,
-                        UInt(urlBuf.count)
+                        UInt(urlBuf.count),
+                        networkId
                     )
                 }
             }
