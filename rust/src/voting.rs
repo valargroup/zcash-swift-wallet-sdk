@@ -294,6 +294,22 @@ impl From<voting::DelegationProofResult> for JsonDelegationProofResult {
     }
 }
 
+/// JSON-serializable DelegationPirPrecomputeResult.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonDelegationPirPrecomputeResult {
+    pub cached_count: u32,
+    pub fetched_count: u32,
+}
+
+impl From<voting::DelegationPirPrecomputeResult> for JsonDelegationPirPrecomputeResult {
+    fn from(r: voting::DelegationPirPrecomputeResult) -> Self {
+        Self {
+            cached_count: r.cached_count,
+            fetched_count: r.fetched_count,
+        }
+    }
+}
+
 /// JSON-serializable DelegationSubmission.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JsonDelegationSubmission {
@@ -1420,6 +1436,45 @@ pub unsafe extern "C" fn zcashlc_voting_generate_note_witnesses(
 // =============================================================================
 // B. VotingDatabase methods — Delegation proof
 // =============================================================================
+
+/// Precompute and cache delegation PIR IMT proofs for ZKP #1.
+///
+/// Returns JSON-encoded `DelegationPirPrecomputeResult` as `*mut FfiBoxedSlice`, or null on error.
+///
+/// # Safety
+///
+/// - `db` must be a valid, non-null `VotingDatabaseHandle` pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    bundle_index: u32,
+    notes_json: *const u8,
+    notes_json_len: usize,
+    pir_server_url: *const u8,
+    pir_server_url_len: usize,
+) -> *mut crate::ffi::BoxedSlice {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        let notes_bytes = unsafe { bytes_from_ptr(notes_json, notes_json_len) };
+        let json_notes: Vec<JsonNoteInfo> = serde_json::from_slice(notes_bytes)?;
+        let core_notes: Vec<voting::NoteInfo> = json_notes.into_iter().map(Into::into).collect();
+        let pir_url = unsafe { str_from_ptr(pir_server_url, pir_server_url_len) }?;
+
+        let result = handle
+            .db
+            .precompute_delegation_pir(&round_id_str, bundle_index, &core_notes, &pir_url)
+            .map_err(|e| anyhow!("precompute_delegation_pir failed: {}", e))?;
+
+        let json_result: JsonDelegationPirPrecomputeResult = result.into();
+        json_to_boxed_slice(&json_result)
+    });
+    unwrap_exc_or_null(res)
+}
 
 /// Build and prove the real delegation ZKP (#1). Long-running.
 ///
