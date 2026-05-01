@@ -538,6 +538,53 @@ extension VotingRustBackend {
 // MARK: - Delegation proof
 
 extension VotingRustBackend {
+    /// Resolve the round PIR endpoint, fetch needed ZKP #1 IMT proofs, and cache them in the voting DB.
+    ///
+    /// This performs the network PIR lookup only; proof construction still happens in
+    /// `buildAndProveDelegation`.
+    public func precomputeDelegationPir(
+        roundId: String,
+        bundleIndex: UInt32,
+        notes: [VotingNoteInfo],
+        pirEndpoints: [String],
+        expectedSnapshotHeight: UInt64,
+        pirResolver: PirSnapshotResolver = PirSnapshotResolver()
+    ) async throws -> VotingDelegationPirPrecomputeResult {
+        let pirServerUrl = try await pirResolver.resolve(
+            endpoints: pirEndpoints,
+            expectedSnapshotHeight: expectedSnapshotHeight
+        )
+
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+        let notesJson = try JSONEncoder().encode(notes)
+        let notesBytes = [UInt8](notesJson)
+        let urlBytes = [UInt8](pirServerUrl.utf8)
+
+        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = roundIdBytes.withUnsafeBufferPointer { ridBuf in
+            notesBytes.withUnsafeBufferPointer { notesBuf in
+                urlBytes.withUnsafeBufferPointer { urlBuf in
+                    zcashlc_voting_precompute_delegation_pir(
+                        dbh,
+                        ridBuf.baseAddress,
+                        UInt(ridBuf.count),
+                        bundleIndex,
+                        notesBuf.baseAddress,
+                        UInt(notesBuf.count),
+                        urlBuf.baseAddress,
+                        UInt(urlBuf.count)
+                    )
+                }
+            }
+        }
+
+        guard let ptr else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`precompute_delegation_pir` failed"))
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return try decodeJSON(from: ptr)
+    }
+
     /// Build and prove the delegation ZKP. Long-running; reports progress via callback.
     ///
     /// Pass every PIR endpoint configured for the round and the round's expected
