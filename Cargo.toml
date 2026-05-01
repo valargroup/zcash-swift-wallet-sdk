@@ -80,6 +80,7 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 # - The "static" feature is required for the "compression" default feature of arti-client.
 xz2 = { version = "0.1", features = ["static"] }
 
+# TODO: switch back to a released zcash_voting version after the PIR precompute crate release.
 zcash_voting = { git = "https://github.com/valargroup/zcash_voting.git", branch = "greg/zkp1-pir-prep" }
 voting-circuits = { version = "0.4.1", features = ["share-reveal"] }
 zcash_keys = { version = "0.13", features = ["orchard"] }
