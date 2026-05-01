@@ -6659,7 +6659,8 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.1"
-source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Fzkp1-pir-prep#fb31bb706ef943a9b8daa5a59663ea9eaf64a6c4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0fb2456313f571003c0bed8d38fb166d78da85653caf828823c1a82f4e1aef1"
 dependencies = [
  "anyhow",
  "ff",
@@ -6675,7 +6676,8 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.1"
-source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Fzkp1-pir-prep#fb31bb706ef943a9b8daa5a59663ea9eaf64a6c4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0267343903fef0eb494f3f6337318249c1daf420a9ea0e73dc7856de26040f1f"
 dependencies = [
  "base64",
  "clap",
@@ -7569,7 +7571,8 @@ dependencies = [
 [[package]]
 name = "zcash_voting"
 version = "0.2.3"
-source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Fzkp1-pir-prep#fb31bb706ef943a9b8daa5a59663ea9eaf64a6c4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5a74a2f4cfd32b9ac6e61767ce6c0513418d07692ef1222dead39df27ec335"
 dependencies = [
  "blake2b_simd",
  "ff",
