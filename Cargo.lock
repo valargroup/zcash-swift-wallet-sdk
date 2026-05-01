@@ -2805,7 +2805,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "voting-circuits 0.4.1",
+ "voting-circuits",
  "xz2",
  "zcash_address",
  "zcash_client_backend",
@@ -6659,6 +6659,7 @@ checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 [[package]]
 name = "vote-commitment-tree"
 version = "0.1.1"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Fzkp1-pir-prep#1aa07a149b6f4938ccf3382c4d3ce9747385d528"
 dependencies = [
  "anyhow",
  "ff",
@@ -6674,6 +6675,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.1.1"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Fzkp1-pir-prep#1aa07a149b6f4938ccf3382c4d3ce9747385d528"
 dependencies = [
  "base64",
  "clap",
@@ -6685,26 +6687,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "vote-commitment-tree",
-]
-
-[[package]]
-name = "voting-circuits"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7830eca6c294cff758bc4885ca8bd2fbdf90f9998f586c5c4cfe2d1b559555f6"
-dependencies = [
- "blake2b_simd",
- "ff",
- "group",
- "halo2_gadgets 0.4.0",
- "halo2_poseidon",
- "halo2_proofs",
- "incrementalmerkletree",
- "lazy_static",
- "orchard",
- "pasta_curves",
- "rand 0.8.5",
- "sinsemilla",
 ]
 
 [[package]]
@@ -7586,7 +7568,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_voting"
-version = "0.1.1"
+version = "0.2.3"
+source = "git+https://github.com/valargroup/zcash_voting.git?branch=greg%2Fzkp1-pir-prep#1aa07a149b6f4938ccf3382c4d3ce9747385d528"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -7608,7 +7591,7 @@ dependencies = [
  "thiserror 2.0.17",
  "vote-commitment-tree",
  "vote-commitment-tree-client",
- "voting-circuits 0.3.1",
+ "voting-circuits",
  "zcash_keys",
  "zcash_primitives",
  "zcash_protocol",
