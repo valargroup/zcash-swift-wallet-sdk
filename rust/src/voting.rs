@@ -1454,6 +1454,7 @@ pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
     notes_json_len: usize,
     pir_server_url: *const u8,
     pir_server_url_len: usize,
+    network_id: u32,
 ) -> *mut crate::ffi::BoxedSlice {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
@@ -1467,7 +1468,13 @@ pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
 
         let result = handle
             .db
-            .precompute_delegation_pir(&round_id_str, bundle_index, &core_notes, &pir_url)
+            .precompute_delegation_pir(
+                &round_id_str,
+                bundle_index,
+                &core_notes,
+                &pir_url,
+                network_id,
+            )
             .map_err(|e| anyhow!("precompute_delegation_pir failed: {}", e))?;
 
         let json_result: JsonDelegationPirPrecomputeResult = result.into();
