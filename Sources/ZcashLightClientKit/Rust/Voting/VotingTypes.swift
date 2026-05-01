@@ -227,6 +227,19 @@ public struct VotingDelegationProofResult: Codable, Sendable {
     }
 }
 
+// MARK: - Delegation PIR Precompute Result (JSON)
+
+/// Result of precomputing and caching PIR proofs needed by delegation proving.
+public struct VotingDelegationPirPrecomputeResult: Codable, Sendable {
+    public let cachedCount: UInt32
+    public let fetchedCount: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case cachedCount = "cached_count"
+        case fetchedCount = "fetched_count"
+    }
+}
+
 // MARK: - Delegation Submission (JSON)
 
 /// Delegation submission payload.
