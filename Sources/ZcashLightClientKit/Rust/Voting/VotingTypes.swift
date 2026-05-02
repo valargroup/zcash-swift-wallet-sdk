@@ -80,6 +80,29 @@ public struct VotingDraftVote: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Completed Vote Record
+
+public struct VotingCompletedVoteRecord: Codable, Equatable, Sendable {
+    public let votedAt: UInt64
+    public let votingWeight: UInt64
+    public let proposalCount: UInt32
+    public let updatedAt: UInt64
+
+    public init(votedAt: UInt64, votingWeight: UInt64, proposalCount: UInt32, updatedAt: UInt64 = 0) {
+        self.votedAt = votedAt
+        self.votingWeight = votingWeight
+        self.proposalCount = proposalCount
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case votedAt = "voted_at"
+        case votingWeight = "voting_weight"
+        case proposalCount = "proposal_count"
+        case updatedAt = "updated_at"
+    }
+}
+
 // MARK: - Note Info (JSON)
 
 /// Note information for voting eligibility.

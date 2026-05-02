@@ -311,6 +311,55 @@ extension VotingRustBackend {
         }
     }
 
+    public func completeVoteRound(roundId: String, record: VotingCompletedVoteRecord) throws {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+        let recordBytes = try JSONEncoder().encode(record)
+
+        let result = roundIdBytes.withUnsafeBufferPointer { ridBuf in
+            recordBytes.withUnsafeBytes { recordBuf in
+                zcashlc_voting_complete_vote_round(
+                    dbh,
+                    ridBuf.baseAddress,
+                    UInt(ridBuf.count),
+                    recordBuf.bindMemory(to: UInt8.self).baseAddress,
+                    UInt(recordBuf.count)
+                )
+            }
+        }
+
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`complete_vote_round` failed"))
+        }
+    }
+
+    public func getCompletedVoteRecord(roundId: String) throws -> VotingCompletedVoteRecord? {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+
+        guard let ptr = roundIdBytes.withUnsafeBufferPointer({ buf in
+            zcashlc_voting_get_completed_vote_record(dbh, buf.baseAddress, UInt(buf.count))
+        }) else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`get_completed_vote_record` failed"))
+        }
+
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return try decodeJSON(from: ptr)
+    }
+
+    public func clearCompletedVoteRecord(roundId: String) throws {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+
+        let result = roundIdBytes.withUnsafeBufferPointer { buf in
+            zcashlc_voting_clear_completed_vote_record(dbh, buf.baseAddress, UInt(buf.count))
+        }
+
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`clear_completed_vote_record` failed"))
+        }
+    }
+
     /// Clear all data for a voting round.
     public func clearRound(roundId: String) throws {
         let dbh = try requireHandle()

@@ -20,7 +20,7 @@ use incrementalmerkletree::Position;
 use orchard::note::ExtractedNoteCommitment;
 use orchard::tree::MerkleHashOrchard;
 use prost::Message;
-use rusqlite::named_params;
+use rusqlite::{OptionalExtension, named_params};
 use serde::{Deserialize, Serialize};
 use zcash_client_backend::proto::service::TreeState;
 use zcash_client_sqlite::util::SystemClock;
@@ -158,6 +158,28 @@ fn ensure_draft_votes_table(db: &VotingDb) -> anyhow::Result<()> {
     .map_err(|e| anyhow!("failed to create draft_votes table: {}", e))
 }
 
+fn ensure_completed_vote_records_table(db: &VotingDb) -> anyhow::Result<()> {
+    let conn = db.conn();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS completed_vote_records (
+            round_id       TEXT NOT NULL,
+            wallet_id      TEXT NOT NULL DEFAULT '',
+            voted_at       INTEGER NOT NULL,
+            voting_weight  INTEGER NOT NULL,
+            proposal_count INTEGER NOT NULL,
+            updated_at     INTEGER NOT NULL,
+            PRIMARY KEY (round_id, wallet_id)
+        );",
+    )
+    .map_err(|e| anyhow!("failed to create completed_vote_records table: {}", e))
+}
+
+fn ensure_app_storage_tables(db: &VotingDb) -> anyhow::Result<()> {
+    ensure_draft_votes_table(db)?;
+    ensure_completed_vote_records_table(db)?;
+    Ok(())
+}
+
 fn replace_draft_votes(
     db: &VotingDb,
     round_id: &str,
@@ -236,6 +258,90 @@ fn clear_draft_votes(db: &VotingDb, round_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn complete_vote_round(
+    db: &VotingDb,
+    round_id: &str,
+    record: &JsonCompletedVoteRecord,
+) -> anyhow::Result<()> {
+    let wallet_id = db.wallet_id();
+    let updated_at = current_unix_seconds();
+    let mut conn = db.conn();
+    let tx = conn.transaction()?;
+
+    tx.execute(
+        "INSERT INTO completed_vote_records (
+            round_id, wallet_id, voted_at, voting_weight, proposal_count, updated_at
+         )
+         VALUES (
+            :round_id, :wallet_id, :voted_at, :voting_weight, :proposal_count, :updated_at
+         )
+         ON CONFLICT(round_id, wallet_id) DO UPDATE SET
+            voted_at = excluded.voted_at,
+            voting_weight = excluded.voting_weight,
+            proposal_count = excluded.proposal_count,
+            updated_at = excluded.updated_at",
+        named_params! {
+            ":round_id": round_id,
+            ":wallet_id": wallet_id,
+            ":voted_at": record.voted_at as i64,
+            ":voting_weight": record.voting_weight as i64,
+            ":proposal_count": record.proposal_count as i64,
+            ":updated_at": updated_at,
+        },
+    )?;
+
+    tx.execute(
+        "DELETE FROM draft_votes WHERE round_id = :round_id AND wallet_id = :wallet_id",
+        named_params! {
+            ":round_id": round_id,
+            ":wallet_id": wallet_id,
+        },
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+fn load_completed_vote_record(
+    db: &VotingDb,
+    round_id: &str,
+) -> anyhow::Result<Option<JsonCompletedVoteRecord>> {
+    let wallet_id = db.wallet_id();
+    let conn = db.conn();
+    conn.query_row(
+        "SELECT voted_at, voting_weight, proposal_count, updated_at
+         FROM completed_vote_records
+         WHERE round_id = :round_id AND wallet_id = :wallet_id",
+        named_params! {
+            ":round_id": round_id,
+            ":wallet_id": wallet_id,
+        },
+        |row| {
+            Ok(JsonCompletedVoteRecord {
+                voted_at: row.get::<_, i64>(0)? as u64,
+                voting_weight: row.get::<_, i64>(1)? as u64,
+                proposal_count: row.get::<_, i64>(2)? as u32,
+                updated_at: row.get::<_, i64>(3)? as u64,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| anyhow!("failed to load completed vote record: {}", e))
+}
+
+fn clear_completed_vote_record(db: &VotingDb, round_id: &str) -> anyhow::Result<()> {
+    let wallet_id = db.wallet_id();
+    let conn = db.conn();
+    conn.execute(
+        "DELETE FROM completed_vote_records WHERE round_id = :round_id AND wallet_id = :wallet_id",
+        named_params! {
+            ":round_id": round_id,
+            ":wallet_id": wallet_id,
+        },
+    )?;
+    Ok(())
+}
+
 // =============================================================================
 // Serde-compatible types for JSON serialization across the FFI boundary
 // =============================================================================
@@ -290,6 +396,15 @@ impl From<voting::NoteInfo> for JsonNoteInfo {
 pub struct JsonDraftVote {
     pub proposal_id: u32,
     pub choice: u32,
+    #[serde(default)]
+    pub updated_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonCompletedVoteRecord {
+    pub voted_at: u64,
+    pub voting_weight: u64,
+    pub proposal_count: u32,
     #[serde(default)]
     pub updated_at: u64,
 }
@@ -736,7 +851,7 @@ pub unsafe extern "C" fn zcashlc_voting_db_open(
         let path_str = unsafe { str_from_ptr(path, path_len) }?;
         let db = VotingDb::open(&path_str)
             .map_err(|e| anyhow!("Error opening voting database: {}", e))?;
-        ensure_draft_votes_table(&db)?;
+        ensure_app_storage_tables(&db)?;
         Ok(Box::into_raw(Box::new(VotingDatabaseHandle {
             db: Arc::new(db),
             tree_sync: VoteTreeSync::new(),
@@ -1150,6 +1265,67 @@ pub unsafe extern "C" fn zcashlc_voting_clear_draft_votes(
 
         clear_draft_votes(&handle.db, &round_id_str)
             .map_err(|e| anyhow!("clear_draft_votes failed: {}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_complete_vote_round(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    record_json: *const u8,
+    record_json_len: usize,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        let record: JsonCompletedVoteRecord =
+            serde_json::from_slice(unsafe { bytes_from_ptr(record_json, record_json_len) })?;
+
+        complete_vote_round(&handle.db, &round_id_str, &record)
+            .map_err(|e| anyhow!("complete_vote_round failed: {}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_get_completed_vote_record(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+) -> *mut crate::ffi::BoxedSlice {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+
+        let record = load_completed_vote_record(&handle.db, &round_id_str)
+            .map_err(|e| anyhow!("get_completed_vote_record failed: {}", e))?;
+        json_to_boxed_slice(&record)
+    });
+    unwrap_exc_or_null(res)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_clear_completed_vote_record(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+
+        clear_completed_vote_record(&handle.db, &round_id_str)
+            .map_err(|e| anyhow!("clear_completed_vote_record failed: {}", e))?;
         Ok(0)
     });
     unwrap_exc_or(res, -1)
@@ -3073,22 +3249,22 @@ fn voting_hotkey_to_ffi(hotkey: voting::VotingHotkey) -> FfiVotingHotkey {
 }
 
 #[cfg(test)]
-mod draft_vote_tests {
+mod voting_app_storage_tests {
     use super::*;
     use rusqlite::OptionalExtension;
 
     fn test_db(wallet_id: &str) -> VotingDb {
         let db = VotingDb::open(":memory:").unwrap();
-        ensure_draft_votes_table(&db).unwrap();
+        ensure_app_storage_tables(&db).unwrap();
         db.set_wallet_id(wallet_id);
         db
     }
 
     #[test]
-    fn ensure_draft_votes_table_creates_table() {
+    fn ensure_app_storage_tables_creates_tables() {
         let db = test_db("wallet-a");
         let conn = db.conn();
-        let table: Option<String> = conn
+        let draft_table: Option<String> = conn
             .query_row(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'draft_votes'",
                 [],
@@ -3096,8 +3272,17 @@ mod draft_vote_tests {
             )
             .optional()
             .unwrap();
+        let completed_table: Option<String> = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'completed_vote_records'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
 
-        assert_eq!(table.as_deref(), Some("draft_votes"));
+        assert_eq!(draft_table.as_deref(), Some("draft_votes"));
+        assert_eq!(completed_table.as_deref(), Some("completed_vote_records"));
     }
 
     #[test]
@@ -3200,5 +3385,137 @@ mod draft_vote_tests {
         let loaded = load_draft_votes(&db, "round-a").unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].choice, 1);
+    }
+
+    #[test]
+    fn complete_load_and_clear_completed_vote_record() {
+        let db = test_db("wallet-a");
+        let record = JsonCompletedVoteRecord {
+            voted_at: 1_700_000_000,
+            voting_weight: 12_345,
+            proposal_count: 3,
+            updated_at: 0,
+        };
+
+        complete_vote_round(&db, "round-a", &record).unwrap();
+        let loaded = load_completed_vote_record(&db, "round-a")
+            .unwrap()
+            .expect("record should be present");
+
+        assert_eq!(loaded.voted_at, record.voted_at);
+        assert_eq!(loaded.voting_weight, record.voting_weight);
+        assert_eq!(loaded.proposal_count, record.proposal_count);
+        assert!(loaded.updated_at > 0);
+
+        clear_completed_vote_record(&db, "round-a").unwrap();
+        assert!(
+            load_completed_vote_record(&db, "round-a")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn complete_vote_round_clears_drafts_atomically() {
+        let db = test_db("wallet-a");
+        replace_draft_votes(
+            &db,
+            "round-a",
+            &[JsonDraftVote {
+                proposal_id: 1,
+                choice: 1,
+                updated_at: 0,
+            }],
+        )
+        .unwrap();
+
+        complete_vote_round(
+            &db,
+            "round-a",
+            &JsonCompletedVoteRecord {
+                voted_at: 1,
+                voting_weight: 2,
+                proposal_count: 1,
+                updated_at: 0,
+            },
+        )
+        .unwrap();
+
+        assert!(load_draft_votes(&db, "round-a").unwrap().is_empty());
+        assert!(
+            load_completed_vote_record(&db, "round-a")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn completed_vote_records_are_wallet_scoped() {
+        let db = test_db("wallet-a");
+        complete_vote_round(
+            &db,
+            "round-a",
+            &JsonCompletedVoteRecord {
+                voted_at: 1,
+                voting_weight: 10,
+                proposal_count: 1,
+                updated_at: 0,
+            },
+        )
+        .unwrap();
+
+        db.set_wallet_id("wallet-b");
+        complete_vote_round(
+            &db,
+            "round-a",
+            &JsonCompletedVoteRecord {
+                voted_at: 2,
+                voting_weight: 20,
+                proposal_count: 2,
+                updated_at: 0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_completed_vote_record(&db, "round-a")
+                .unwrap()
+                .unwrap()
+                .voting_weight,
+            20
+        );
+
+        db.set_wallet_id("wallet-a");
+        assert_eq!(
+            load_completed_vote_record(&db, "round-a")
+                .unwrap()
+                .unwrap()
+                .voting_weight,
+            10
+        );
+    }
+
+    #[test]
+    fn clear_round_does_not_delete_completed_vote_record() {
+        let db = test_db("wallet-a");
+        complete_vote_round(
+            &db,
+            "round-a",
+            &JsonCompletedVoteRecord {
+                voted_at: 1,
+                voting_weight: 2,
+                proposal_count: 1,
+                updated_at: 0,
+            },
+        )
+        .unwrap();
+
+        db.clear_round("round-a").unwrap();
+
+        assert!(
+            load_completed_vote_record(&db, "round-a")
+                .unwrap()
+                .is_some()
+        );
     }
 }
