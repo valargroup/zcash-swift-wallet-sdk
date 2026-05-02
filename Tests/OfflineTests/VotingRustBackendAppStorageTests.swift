@@ -1,7 +1,7 @@
 import XCTest
 @testable import ZcashLightClientKit
 
-final class VotingRustBackendDraftVoteTests: XCTestCase {
+final class VotingRustBackendAppStorageTests: XCTestCase {
     func testDraftVotesRoundTripAndClear() throws {
         let backend = VotingRustBackend()
         try backend.open(path: ":memory:")
