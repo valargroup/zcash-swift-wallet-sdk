@@ -262,6 +262,55 @@ extension VotingRustBackend {
         return result
     }
 
+    public func replaceDraftVotes(roundId: String, drafts: [VotingDraftVote]) throws {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+        let draftBytes = try JSONEncoder().encode(drafts)
+
+        let result = roundIdBytes.withUnsafeBufferPointer { ridBuf in
+            draftBytes.withUnsafeBytes { draftBuf in
+                zcashlc_voting_replace_draft_votes(
+                    dbh,
+                    ridBuf.baseAddress,
+                    UInt(ridBuf.count),
+                    draftBuf.bindMemory(to: UInt8.self).baseAddress,
+                    UInt(draftBuf.count)
+                )
+            }
+        }
+
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`replace_draft_votes` failed"))
+        }
+    }
+
+    public func getDraftVotes(roundId: String) throws -> [VotingDraftVote] {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+
+        guard let ptr = roundIdBytes.withUnsafeBufferPointer({ buf in
+            zcashlc_voting_get_draft_votes(dbh, buf.baseAddress, UInt(buf.count))
+        }) else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`get_draft_votes` failed"))
+        }
+
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return try decodeJSON(from: ptr)
+    }
+
+    public func clearDraftVotes(roundId: String) throws {
+        let dbh = try requireHandle()
+        let roundIdBytes = [UInt8](roundId.utf8)
+
+        let result = roundIdBytes.withUnsafeBufferPointer { buf in
+            zcashlc_voting_clear_draft_votes(dbh, buf.baseAddress, UInt(buf.count))
+        }
+
+        guard result == 0 else {
+            throw VotingRustBackendError.rustError(lastErrorMessage(fallback: "`clear_draft_votes` failed"))
+        }
+    }
+
     /// Clear all data for a voting round.
     public func clearRound(roundId: String) throws {
         let dbh = try requireHandle()

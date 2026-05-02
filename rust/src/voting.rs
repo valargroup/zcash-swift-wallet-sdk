@@ -20,6 +20,7 @@ use incrementalmerkletree::Position;
 use orchard::note::ExtractedNoteCommitment;
 use orchard::tree::MerkleHashOrchard;
 use prost::Message;
+use rusqlite::named_params;
 use serde::{Deserialize, Serialize};
 use zcash_client_backend::proto::service::TreeState;
 use zcash_client_sqlite::util::SystemClock;
@@ -27,9 +28,9 @@ use zcash_keys::keys::{UnifiedFullViewingKey, UnifiedSpendingKey};
 use zcash_protocol::consensus::{self, MAIN_NETWORK, Network, TEST_NETWORK};
 use zip32::{AccountId, Scope};
 
-use zcash_voting as voting;
 use voting::storage::VotingDb;
 use voting::tree_sync::VoteTreeSync;
+use zcash_voting as voting;
 
 use crate::{unwrap_exc_or, unwrap_exc_or_null};
 
@@ -57,7 +58,6 @@ unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
 unsafe fn bytes_from_ptr<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
     unsafe { std::slice::from_raw_parts(ptr, len) }
 }
-
 
 /// Return JSON-serialized bytes as `*mut ffi::BoxedSlice`.
 fn json_to_boxed_slice<T: Serialize>(value: &T) -> anyhow::Result<*mut crate::ffi::BoxedSlice> {
@@ -136,6 +136,106 @@ fn open_wallet_db(
     Ok((wallet_db, network))
 }
 
+fn current_unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+fn ensure_draft_votes_table(db: &VotingDb) -> anyhow::Result<()> {
+    let conn = db.conn();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS draft_votes (
+            round_id    TEXT NOT NULL,
+            wallet_id   TEXT NOT NULL DEFAULT '',
+            proposal_id INTEGER NOT NULL,
+            choice      INTEGER NOT NULL,
+            updated_at  INTEGER NOT NULL,
+            PRIMARY KEY (round_id, wallet_id, proposal_id)
+        );",
+    )
+    .map_err(|e| anyhow!("failed to create draft_votes table: {}", e))
+}
+
+fn replace_draft_votes(
+    db: &VotingDb,
+    round_id: &str,
+    drafts: &[JsonDraftVote],
+) -> anyhow::Result<()> {
+    let wallet_id = db.wallet_id();
+    let updated_at = current_unix_seconds();
+    let mut conn = db.conn();
+    let tx = conn.transaction()?;
+
+    tx.execute(
+        "DELETE FROM draft_votes WHERE round_id = :round_id AND wallet_id = :wallet_id",
+        named_params! {
+            ":round_id": round_id,
+            ":wallet_id": wallet_id,
+        },
+    )?;
+
+    for draft in drafts {
+        tx.execute(
+            "INSERT INTO draft_votes (round_id, wallet_id, proposal_id, choice, updated_at)
+             VALUES (:round_id, :wallet_id, :proposal_id, :choice, :updated_at)",
+            named_params! {
+                ":round_id": round_id,
+                ":wallet_id": wallet_id,
+                ":proposal_id": draft.proposal_id as i64,
+                ":choice": draft.choice as i64,
+                ":updated_at": updated_at,
+            },
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+fn load_draft_votes(db: &VotingDb, round_id: &str) -> anyhow::Result<Vec<JsonDraftVote>> {
+    let wallet_id = db.wallet_id();
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT proposal_id, choice, updated_at
+         FROM draft_votes
+         WHERE round_id = :round_id AND wallet_id = :wallet_id
+         ORDER BY proposal_id ASC",
+    )?;
+
+    let rows = stmt
+        .query_map(
+            named_params! {
+                ":round_id": round_id,
+                ":wallet_id": wallet_id,
+            },
+            |row| {
+                Ok(JsonDraftVote {
+                    proposal_id: row.get::<_, i64>(0)? as u32,
+                    choice: row.get::<_, i64>(1)? as u32,
+                    updated_at: row.get::<_, i64>(2)? as u64,
+                })
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(rows)
+}
+
+fn clear_draft_votes(db: &VotingDb, round_id: &str) -> anyhow::Result<()> {
+    let wallet_id = db.wallet_id();
+    let conn = db.conn();
+    conn.execute(
+        "DELETE FROM draft_votes WHERE round_id = :round_id AND wallet_id = :wallet_id",
+        named_params! {
+            ":round_id": round_id,
+            ":wallet_id": wallet_id,
+        },
+    )?;
+    Ok(())
+}
+
 // =============================================================================
 // Serde-compatible types for JSON serialization across the FFI boundary
 // =============================================================================
@@ -184,6 +284,14 @@ impl From<voting::NoteInfo> for JsonNoteInfo {
             ufvk_str: n.ufvk_str,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JsonDraftVote {
+    pub proposal_id: u32,
+    pub choice: u32,
+    #[serde(default)]
+    pub updated_at: u64,
 }
 
 /// JSON-serializable VotingPczt.
@@ -438,7 +546,8 @@ impl From<voting::SharePayload> for JsonSharePayload {
                 share_index: p.enc_share.share_index,
             },
             tree_position: p.tree_position,
-            all_enc_shares: p.all_enc_shares
+            all_enc_shares: p
+                .all_enc_shares
                 .into_iter()
                 .map(|s| JsonWireEncryptedShare {
                     c1: s.c1,
@@ -627,6 +736,7 @@ pub unsafe extern "C" fn zcashlc_voting_db_open(
         let path_str = unsafe { str_from_ptr(path, path_len) }?;
         let db = VotingDb::open(&path_str)
             .map_err(|e| anyhow!("Error opening voting database: {}", e))?;
+        ensure_draft_votes_table(&db)?;
         Ok(Box::into_raw(Box::new(VotingDatabaseHandle {
             db: Arc::new(db),
             tree_sync: VoteTreeSync::new(),
@@ -808,8 +918,8 @@ pub unsafe extern "C" fn zcashlc_voting_init_round(
 ) -> i32 {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }
-            .ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let ea_pk_bytes = unsafe { bytes_from_ptr(ea_pk, ea_pk_len) }.to_vec();
         let nc_root_bytes = unsafe { bytes_from_ptr(nc_root, nc_root_len) }.to_vec();
@@ -855,8 +965,8 @@ pub unsafe extern "C" fn zcashlc_voting_get_round_state(
 ) -> *mut FfiRoundState {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }
-            .ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
 
         let state = handle
@@ -981,6 +1091,70 @@ pub unsafe extern "C" fn zcashlc_voting_get_votes(
     unwrap_exc_or_null(res)
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_replace_draft_votes(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+    drafts_json: *const u8,
+    drafts_json_len: usize,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+        let drafts: Vec<JsonDraftVote> = if drafts_json_len == 0 {
+            Vec::new()
+        } else {
+            serde_json::from_slice(unsafe { bytes_from_ptr(drafts_json, drafts_json_len) })?
+        };
+
+        replace_draft_votes(&handle.db, &round_id_str, &drafts)
+            .map_err(|e| anyhow!("replace_draft_votes failed: {}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_get_draft_votes(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+) -> *mut crate::ffi::BoxedSlice {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+
+        let drafts = load_draft_votes(&handle.db, &round_id_str)
+            .map_err(|e| anyhow!("get_draft_votes failed: {}", e))?;
+        json_to_boxed_slice(&drafts)
+    });
+    unwrap_exc_or_null(res)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_clear_draft_votes(
+    db: *mut VotingDatabaseHandle,
+    round_id: *const u8,
+    round_id_len: usize,
+) -> i32 {
+    let db = AssertUnwindSafe(db);
+    let res = catch_panic(|| {
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
+
+        clear_draft_votes(&handle.db, &round_id_str)
+            .map_err(|e| anyhow!("clear_draft_votes failed: {}", e))?;
+        Ok(0)
+    });
+    unwrap_exc_or(res, -1)
+}
+
 /// Clear all data for a voting round.
 ///
 /// Returns 0 on success, -1 on error.
@@ -1088,10 +1262,13 @@ pub unsafe extern "C" fn zcashlc_voting_get_wallet_notes(
             };
             let account_ids = wallet_db.get_account_ids()?;
             match acct_idx {
-                Some(idx) => account_ids
-                    .get(idx as usize)
-                    .copied()
-                    .ok_or_else(|| anyhow!("account_index {} out of range (wallet has {} accounts)", idx, account_ids.len()))?,
+                Some(idx) => account_ids.get(idx as usize).copied().ok_or_else(|| {
+                    anyhow!(
+                        "account_index {} out of range (wallet has {} accounts)",
+                        idx,
+                        account_ids.len()
+                    )
+                })?,
                 None => *account_ids
                     .first()
                     .ok_or_else(|| anyhow!("no accounts in wallet"))?,
@@ -1102,14 +1279,20 @@ pub unsafe extern "C" fn zcashlc_voting_get_wallet_notes(
             .ok_or_else(|| anyhow!("account not found"))?;
 
         use zcash_client_backend::data_api::Account;
-        let ufvk = account.ufvk()
+        let ufvk = account
+            .ufvk()
             .ok_or_else(|| anyhow!("account has no UFVK"))?;
         let account_uuid = account.id();
 
         let height = zcash_protocol::consensus::BlockHeight::from_u32(snapshot_height as u32);
         let received_notes = wallet_db
             .get_unspent_orchard_notes_at_historical_height(account_uuid, height)
-            .map_err(|e| anyhow!("get_unspent_orchard_notes_at_historical_height failed: {}", e))?;
+            .map_err(|e| {
+                anyhow!(
+                    "get_unspent_orchard_notes_at_historical_height failed: {}",
+                    e
+                )
+            })?;
 
         let mut json_notes = Vec::with_capacity(received_notes.len());
         for rn in &received_notes {
@@ -1269,7 +1452,10 @@ pub unsafe extern "C" fn zcashlc_voting_build_pczt(
         let hotkey_addr = unsafe { bytes_from_ptr(hotkey_raw_address, hotkey_raw_address_len) };
         let seed_fp_bytes = unsafe { bytes_from_ptr(seed_fingerprint, seed_fingerprint_len) };
         let seed_fp_32: [u8; 32] = seed_fp_bytes.try_into().map_err(|_| {
-            anyhow!("seed_fingerprint must be 32 bytes, got {}", seed_fp_bytes.len())
+            anyhow!(
+                "seed_fingerprint must be 32 bytes, got {}",
+                seed_fp_bytes.len()
+            )
         })?;
         let round_name_str = unsafe { str_from_ptr(round_name, round_name_len) }?;
 
@@ -1360,20 +1546,23 @@ pub unsafe extern "C" fn zcashlc_voting_generate_note_witnesses(
         // Load cached tree state from voting DB and parse frontier
         let wallet_id = handle.db.wallet_id();
         let conn = handle.db.conn();
-        let tree_state_bytes = voting::storage::queries::load_tree_state(&conn, &round_id_str, &wallet_id)
-            .map_err(|e| anyhow!("load_tree_state failed: {}", e))?;
+        let tree_state_bytes =
+            voting::storage::queries::load_tree_state(&conn, &round_id_str, &wallet_id)
+                .map_err(|e| anyhow!("load_tree_state failed: {}", e))?;
         let params = voting::storage::queries::load_round_params(&conn, &round_id_str, &wallet_id)
             .map_err(|e| anyhow!("load_round_params failed: {}", e))?;
         drop(conn);
 
         let tree_state = TreeState::decode(tree_state_bytes.as_slice())
             .map_err(|e| anyhow!("failed to decode TreeState protobuf: {}", e))?;
-        let orchard_ct = tree_state.orchard_tree()
+        let orchard_ct = tree_state
+            .orchard_tree()
             .map_err(|e| anyhow!("failed to parse orchard tree from TreeState: {}", e))?;
         let frontier_root = orchard_ct.root();
         let frontier = orchard_ct.to_frontier();
-        let nonempty_frontier = frontier.take()
-            .ok_or_else(|| anyhow!("empty orchard frontier — no orchard activity at snapshot height"))?;
+        let nonempty_frontier = frontier.take().ok_or_else(|| {
+            anyhow!("empty orchard frontier — no orchard activity at snapshot height")
+        })?;
 
         // Generate witnesses from wallet DB shard data + frontier
         let (wallet_db, _network) = open_wallet_db(&wallet_path_str, 0)?; // network_id not needed for tree ops
@@ -1381,37 +1570,57 @@ pub unsafe extern "C" fn zcashlc_voting_generate_note_witnesses(
             .iter()
             .map(|n| Position::from(n.position))
             .collect();
-        let checkpoint_height = zcash_protocol::consensus::BlockHeight::from_u32(params.snapshot_height as u32);
+        let checkpoint_height =
+            zcash_protocol::consensus::BlockHeight::from_u32(params.snapshot_height as u32);
 
         let merkle_paths = wallet_db
-            .generate_orchard_witnesses_at_historical_height(&positions, nonempty_frontier, checkpoint_height)
-            .map_err(|e| anyhow!("generate_orchard_witnesses_at_historical_height failed: {}", e))?;
+            .generate_orchard_witnesses_at_historical_height(
+                &positions,
+                nonempty_frontier,
+                checkpoint_height,
+            )
+            .map_err(|e| {
+                anyhow!(
+                    "generate_orchard_witnesses_at_historical_height failed: {}",
+                    e
+                )
+            })?;
 
         // Convert MerklePaths to WitnessData
         let root_bytes = frontier_root.to_bytes().to_vec();
         let witnesses: Vec<voting::WitnessData> = merkle_paths
             .into_iter()
             .zip(core_notes.iter())
-            .map(|(path, note): (incrementalmerkletree::MerklePath<MerkleHashOrchard, { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 }>, &voting::NoteInfo)| {
-                let auth_path: Vec<Vec<u8>> = path.path_elems()
-                    .iter()
-                    .map(|h: &MerkleHashOrchard| h.to_bytes().to_vec())
-                    .collect();
-                voting::WitnessData {
-                    note_commitment: note.commitment.clone(),
-                    position: note.position,
-                    root: root_bytes.clone(),
-                    auth_path,
-                }
-            })
+            .map(
+                |(path, note): (
+                    incrementalmerkletree::MerklePath<
+                        MerkleHashOrchard,
+                        { orchard::NOTE_COMMITMENT_TREE_DEPTH as u8 },
+                    >,
+                    &voting::NoteInfo,
+                )| {
+                    let auth_path: Vec<Vec<u8>> = path
+                        .path_elems()
+                        .iter()
+                        .map(|h: &MerkleHashOrchard| h.to_bytes().to_vec())
+                        .collect();
+                    voting::WitnessData {
+                        note_commitment: note.commitment.clone(),
+                        position: note.position,
+                        root: root_bytes.clone(),
+                        auth_path,
+                    }
+                },
+            )
             .collect();
 
         // Verify and cache in voting DB
-        handle.db.store_witnesses(&round_id_str, bundle_index, &witnesses)
+        handle
+            .db
+            .store_witnesses(&round_id_str, bundle_index, &witnesses)
             .map_err(|e| anyhow!("store_witnesses failed: {}", e))?;
 
-        let json_witnesses: Vec<JsonWitnessData> =
-            witnesses.into_iter().map(Into::into).collect();
+        let json_witnesses: Vec<JsonWitnessData> = witnesses.into_iter().map(Into::into).collect();
         json_to_boxed_slice(&json_witnesses)
     });
     unwrap_exc_or_null(res)
@@ -1512,13 +1721,7 @@ pub unsafe extern "C" fn zcashlc_voting_get_delegation_submission(
 
         let submission = handle
             .db
-            .get_delegation_submission(
-                &round_id_str,
-                bundle_index,
-                seed,
-                network_id,
-                account_index,
-            )
+            .get_delegation_submission(&round_id_str, bundle_index, seed, network_id, account_index)
             .map_err(|e| anyhow!("get_delegation_submission failed: {}", e))?;
 
         let json_sub: JsonDelegationSubmission = submission.into();
@@ -1561,12 +1764,7 @@ pub unsafe extern "C" fn zcashlc_voting_get_delegation_submission_with_keystone_
                 sig_bytes,
                 sighash_bytes,
             )
-            .map_err(|e| {
-                anyhow!(
-                    "get_delegation_submission_with_keystone_sig failed: {}",
-                    e
-                )
-            })?;
+            .map_err(|e| anyhow!("get_delegation_submission_with_keystone_sig failed: {}", e))?;
 
         let json_sub: JsonDelegationSubmission = submission.into();
         json_to_boxed_slice(&json_sub)
@@ -1682,15 +1880,13 @@ pub unsafe extern "C" fn zcashlc_voting_build_vote_commitment(
             unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let seed = unsafe { bytes_from_ptr(hotkey_seed, hotkey_seed_len) };
-        let auth_path_bytes =
-            unsafe { bytes_from_ptr(van_auth_path_json, van_auth_path_json_len) };
+        let auth_path_bytes = unsafe { bytes_from_ptr(van_auth_path_json, van_auth_path_json_len) };
         let auth_path_vecs: Vec<Vec<u8>> = serde_json::from_slice(auth_path_bytes)?;
         let auth_path: Vec<[u8; 32]> = auth_path_vecs
             .into_iter()
             .map(|v| {
-                v.try_into().map_err(|_| {
-                    anyhow!("each auth_path sibling must be 32 bytes")
-                })
+                v.try_into()
+                    .map_err(|_| anyhow!("each auth_path sibling must be 32 bytes"))
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
@@ -1759,8 +1955,7 @@ pub unsafe extern "C" fn zcashlc_voting_build_share_payloads(
             json_shares.into_iter().map(Into::into).collect();
 
         let commitment_bytes = unsafe { bytes_from_ptr(commitment_json, commitment_json_len) };
-        let json_commitment: JsonVoteCommitmentBundle =
-            serde_json::from_slice(commitment_bytes)?;
+        let json_commitment: JsonVoteCommitmentBundle = serde_json::from_slice(commitment_bytes)?;
         let core_commitment: voting::VoteCommitmentBundle = json_commitment.into();
 
         let payloads = handle
@@ -1775,8 +1970,7 @@ pub unsafe extern "C" fn zcashlc_voting_build_share_payloads(
             )
             .map_err(|e| anyhow!("build_share_payloads failed: {}", e))?;
 
-        let json_payloads: Vec<JsonSharePayload> =
-            payloads.into_iter().map(Into::into).collect();
+        let json_payloads: Vec<JsonSharePayload> = payloads.into_iter().map(Into::into).collect();
         json_to_boxed_slice(&json_payloads)
     });
     unwrap_exc_or_null(res)
@@ -1829,10 +2023,13 @@ pub unsafe extern "C" fn zcashlc_voting_store_delegation_tx_hash(
 ) -> i32 {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let tx_hash_str = unsafe { str_from_ptr(tx_hash, tx_hash_len) }?;
-        handle.db.store_delegation_tx_hash(&round_id_str, bundle_index, &tx_hash_str)
+        handle
+            .db
+            .store_delegation_tx_hash(&round_id_str, bundle_index, &tx_hash_str)
             .map_err(|e| anyhow!("{}", e))?;
         Ok(0)
     });
@@ -1850,9 +2047,12 @@ pub unsafe extern "C" fn zcashlc_voting_get_delegation_tx_hash(
 ) -> *mut crate::ffi::BoxedSlice {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
-        let hash = handle.db.get_delegation_tx_hash(&round_id_str, bundle_index)
+        let hash = handle
+            .db
+            .get_delegation_tx_hash(&round_id_str, bundle_index)
             .map_err(|e| anyhow!("{}", e))?;
         json_to_boxed_slice(&hash)
     });
@@ -1873,10 +2073,13 @@ pub unsafe extern "C" fn zcashlc_voting_store_vote_tx_hash(
 ) -> i32 {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let tx_hash_str = unsafe { str_from_ptr(tx_hash, tx_hash_len) }?;
-        handle.db.store_vote_tx_hash(&round_id_str, bundle_index, proposal_id, &tx_hash_str)
+        handle
+            .db
+            .store_vote_tx_hash(&round_id_str, bundle_index, proposal_id, &tx_hash_str)
             .map_err(|e| anyhow!("{}", e))?;
         Ok(0)
     });
@@ -1895,9 +2098,12 @@ pub unsafe extern "C" fn zcashlc_voting_get_vote_tx_hash(
 ) -> *mut crate::ffi::BoxedSlice {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
-        let hash = handle.db.get_vote_tx_hash(&round_id_str, bundle_index, proposal_id)
+        let hash = handle
+            .db
+            .get_vote_tx_hash(&round_id_str, bundle_index, proposal_id)
             .map_err(|e| anyhow!("{}", e))?;
         json_to_boxed_slice(&hash)
     });
@@ -1920,10 +2126,19 @@ pub unsafe extern "C" fn zcashlc_voting_store_commitment_bundle(
 ) -> i32 {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let json_str = unsafe { str_from_ptr(bundle_json, bundle_json_len) }?;
-        handle.db.store_commitment_bundle(&round_id_str, bundle_index, proposal_id, &json_str, vc_tree_position)
+        handle
+            .db
+            .store_commitment_bundle(
+                &round_id_str,
+                bundle_index,
+                proposal_id,
+                &json_str,
+                vc_tree_position,
+            )
             .map_err(|e| anyhow!("{}", e))?;
         Ok(0)
     });
@@ -1942,9 +2157,12 @@ pub unsafe extern "C" fn zcashlc_voting_get_commitment_bundle(
 ) -> *mut crate::ffi::BoxedSlice {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
-        let result = handle.db.get_commitment_bundle(&round_id_str, bundle_index, proposal_id)
+        let result = handle
+            .db
+            .get_commitment_bundle(&round_id_str, bundle_index, proposal_id)
             .map_err(|e| anyhow!("{}", e))?;
         json_to_boxed_slice(&result)
     });
@@ -1968,12 +2186,21 @@ pub unsafe extern "C" fn zcashlc_voting_store_keystone_signature(
 ) -> i32 {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let sig_bytes = unsafe { bytes_from_ptr(sig, sig_len) };
         let sighash_bytes = unsafe { bytes_from_ptr(sighash, sighash_len) };
         let rk_bytes = unsafe { bytes_from_ptr(rk, rk_len) };
-        handle.db.store_keystone_signature(&round_id_str, bundle_index, sig_bytes, sighash_bytes, rk_bytes)
+        handle
+            .db
+            .store_keystone_signature(
+                &round_id_str,
+                bundle_index,
+                sig_bytes,
+                sighash_bytes,
+                rk_bytes,
+            )
             .map_err(|e| anyhow!("{}", e))?;
         Ok(0)
     });
@@ -1990,9 +2217,12 @@ pub unsafe extern "C" fn zcashlc_voting_get_keystone_signatures(
 ) -> *mut crate::ffi::BoxedSlice {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
-        let sigs = handle.db.get_keystone_signatures(&round_id_str)
+        let sigs = handle
+            .db
+            .get_keystone_signatures(&round_id_str)
             .map_err(|e| anyhow!("{}", e))?;
 
         #[derive(serde::Serialize)]
@@ -2003,12 +2233,15 @@ pub unsafe extern "C" fn zcashlc_voting_get_keystone_signatures(
             rk: Vec<u8>,
         }
 
-        let out: Vec<SigOut> = sigs.into_iter().map(|s| SigOut {
-            bundle_index: s.bundle_index,
-            sig: s.sig,
-            sighash: s.sighash,
-            rk: s.rk,
-        }).collect();
+        let out: Vec<SigOut> = sigs
+            .into_iter()
+            .map(|s| SigOut {
+                bundle_index: s.bundle_index,
+                sig: s.sig,
+                sighash: s.sighash,
+                rk: s.rk,
+            })
+            .collect();
 
         json_to_boxed_slice(&out)
     });
@@ -2026,9 +2259,12 @@ pub unsafe extern "C" fn zcashlc_voting_clear_recovery_state(
 ) -> i32 {
     let db = AssertUnwindSafe(db);
     let res = catch_panic(|| {
-        let handle = unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        let handle =
+            unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
-        handle.db.clear_recovery_state(&round_id_str)
+        handle
+            .db
+            .clear_recovery_state(&round_id_str)
             .map_err(|e| anyhow!("{}", e))?;
         Ok(0)
     });
@@ -2219,7 +2455,7 @@ pub unsafe extern "C" fn zcashlc_voting_generate_delegation_inputs(
                 return Err(anyhow!(
                     "invalid network_id {}, expected 0 (mainnet) or 1 (testnet)",
                     network_id
-                ))
+                ));
             }
         }
         .map_err(|e| anyhow!("failed to derive sender UnifiedSpendingKey: {}", e))?;
@@ -2298,10 +2534,7 @@ pub unsafe extern "C" fn zcashlc_voting_generate_delegation_inputs_with_fvk(
         let seed_fp = unsafe { bytes_from_ptr(seed_fingerprint, seed_fingerprint_len) }.to_vec();
 
         if fvk.len() != 96 {
-            return Err(anyhow!(
-                "fvk_bytes must be 96 bytes, got {}",
-                fvk.len()
-            ));
+            return Err(anyhow!("fvk_bytes must be 96 bytes, got {}", fvk.len()));
         }
         if hotkey.len() < 32 {
             return Err(anyhow!(
@@ -2327,7 +2560,7 @@ pub unsafe extern "C" fn zcashlc_voting_generate_delegation_inputs_with_fvk(
                 return Err(anyhow!(
                     "invalid network_id {}, expected 0 (mainnet) or 1 (testnet)",
                     network_id
-                ))
+                ));
             }
         }
         .map_err(|e| anyhow!("failed to derive hotkey UnifiedSpendingKey: {}", e))?;
@@ -2430,7 +2663,7 @@ pub unsafe extern "C" fn zcashlc_voting_extract_orchard_fvk_from_ufvk(
                 return Err(anyhow!(
                     "invalid network_id {}, expected 0 (mainnet) or 1 (testnet)",
                     network_id
-                ))
+                ));
             }
         }
         .map_err(|e| anyhow!("failed to decode UFVK string: {}", e))?;
@@ -2461,7 +2694,8 @@ pub unsafe extern "C" fn zcashlc_voting_extract_nc_root(
         let bytes = unsafe { bytes_from_ptr(tree_state_bytes, tree_state_bytes_len) };
         let tree_state = TreeState::decode(bytes)
             .map_err(|e| anyhow!("failed to decode TreeState protobuf: {}", e))?;
-        let orchard_ct = tree_state.orchard_tree()
+        let orchard_ct = tree_state
+            .orchard_tree()
             .map_err(|e| anyhow!("failed to parse orchard tree from TreeState: {}", e))?;
         let nc_root = orchard_ct.root().to_bytes().to_vec();
         Ok(crate::ffi::BoxedSlice::some(nc_root))
@@ -2504,7 +2738,8 @@ pub unsafe extern "C" fn zcashlc_voting_sign_cast_vote(
         let round_id = unsafe { str_from_ptr(vote_round_id_hex, vote_round_id_hex_len) }?;
         let r_vpk = unsafe { bytes_from_ptr(r_vpk_bytes, r_vpk_bytes_len) };
         let van_nf = unsafe { bytes_from_ptr(van_nullifier, van_nullifier_len) };
-        let van_new = unsafe { bytes_from_ptr(vote_authority_note_new, vote_authority_note_new_len) };
+        let van_new =
+            unsafe { bytes_from_ptr(vote_authority_note_new, vote_authority_note_new_len) };
         let vc = unsafe { bytes_from_ptr(vote_commitment, vote_commitment_len) };
         let alpha = unsafe { bytes_from_ptr(alpha_v, alpha_v_len) };
 
@@ -2628,8 +2863,7 @@ pub unsafe extern "C" fn zcashlc_voting_compute_share_nullifier(
             .map_err(|e| anyhow!("compute_share_nullifier failed: {}", e))?;
 
         let hex_str: String = nullifier.iter().map(|b| format!("{:02x}", b)).collect();
-        let c_str = CString::new(hex_str)
-            .map_err(|e| anyhow!("null byte in hex string: {}", e))?;
+        let c_str = CString::new(hex_str).map_err(|e| anyhow!("null byte in hex string: {}", e))?;
         Ok(c_str.into_raw())
     });
     unwrap_exc_or_null(res)
@@ -2807,7 +3041,13 @@ pub unsafe extern "C" fn zcashlc_voting_add_sent_servers(
 
         handle
             .db
-            .add_sent_servers(&round_id_str, bundle_index, proposal_id, share_index, &new_urls)
+            .add_sent_servers(
+                &round_id_str,
+                bundle_index,
+                proposal_id,
+                share_index,
+                &new_urls,
+            )
             .map_err(|e| anyhow!("{}", e))?;
         Ok(0)
     });
@@ -2829,5 +3069,136 @@ fn voting_hotkey_to_ffi(hotkey: voting::VotingHotkey) -> FfiVotingHotkey {
         public_key: pk_ptr,
         public_key_len: pk_len,
         address,
+    }
+}
+
+#[cfg(test)]
+mod draft_vote_tests {
+    use super::*;
+    use rusqlite::OptionalExtension;
+
+    fn test_db(wallet_id: &str) -> VotingDb {
+        let db = VotingDb::open(":memory:").unwrap();
+        ensure_draft_votes_table(&db).unwrap();
+        db.set_wallet_id(wallet_id);
+        db
+    }
+
+    #[test]
+    fn ensure_draft_votes_table_creates_table() {
+        let db = test_db("wallet-a");
+        let conn = db.conn();
+        let table: Option<String> = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'draft_votes'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+
+        assert_eq!(table.as_deref(), Some("draft_votes"));
+    }
+
+    #[test]
+    fn replace_load_and_clear_draft_votes() {
+        let db = test_db("wallet-a");
+        let drafts = vec![
+            JsonDraftVote {
+                proposal_id: 2,
+                choice: 1,
+                updated_at: 0,
+            },
+            JsonDraftVote {
+                proposal_id: 1,
+                choice: 0,
+                updated_at: 0,
+            },
+        ];
+
+        replace_draft_votes(&db, "round-a", &drafts).unwrap();
+        let loaded = load_draft_votes(&db, "round-a").unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].proposal_id, 1);
+        assert_eq!(loaded[0].choice, 0);
+        assert!(loaded[0].updated_at > 0);
+        assert_eq!(loaded[1].proposal_id, 2);
+        assert_eq!(loaded[1].choice, 1);
+
+        clear_draft_votes(&db, "round-a").unwrap();
+        assert!(load_draft_votes(&db, "round-a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn replace_with_empty_list_clears_draft_votes() {
+        let db = test_db("wallet-a");
+        replace_draft_votes(
+            &db,
+            "round-a",
+            &[JsonDraftVote {
+                proposal_id: 1,
+                choice: 1,
+                updated_at: 0,
+            }],
+        )
+        .unwrap();
+
+        replace_draft_votes(&db, "round-a", &[]).unwrap();
+
+        assert!(load_draft_votes(&db, "round-a").unwrap().is_empty());
+    }
+
+    #[test]
+    fn draft_votes_are_wallet_scoped() {
+        let db = test_db("wallet-a");
+        replace_draft_votes(
+            &db,
+            "round-a",
+            &[JsonDraftVote {
+                proposal_id: 1,
+                choice: 1,
+                updated_at: 0,
+            }],
+        )
+        .unwrap();
+
+        db.set_wallet_id("wallet-b");
+        replace_draft_votes(
+            &db,
+            "round-a",
+            &[JsonDraftVote {
+                proposal_id: 1,
+                choice: 2,
+                updated_at: 0,
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(load_draft_votes(&db, "round-a").unwrap()[0].choice, 2);
+
+        db.set_wallet_id("wallet-a");
+        assert_eq!(load_draft_votes(&db, "round-a").unwrap()[0].choice, 1);
+    }
+
+    #[test]
+    fn clear_round_does_not_delete_draft_votes() {
+        let db = test_db("wallet-a");
+        replace_draft_votes(
+            &db,
+            "round-a",
+            &[JsonDraftVote {
+                proposal_id: 1,
+                choice: 1,
+                updated_at: 0,
+            }],
+        )
+        .unwrap();
+
+        db.clear_round("round-a").unwrap();
+
+        let loaded = load_draft_votes(&db, "round-a").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].choice, 1);
     }
 }

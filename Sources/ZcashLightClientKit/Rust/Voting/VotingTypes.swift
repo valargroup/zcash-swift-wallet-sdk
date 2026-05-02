@@ -60,6 +60,26 @@ public struct VotingVoteRecord: Sendable {
     public let submitted: Bool
 }
 
+// MARK: - Draft Vote
+
+public struct VotingDraftVote: Codable, Equatable, Sendable {
+    public let proposalId: UInt32
+    public let choice: UInt32
+    public let updatedAt: UInt64
+
+    public init(proposalId: UInt32, choice: UInt32, updatedAt: UInt64 = 0) {
+        self.proposalId = proposalId
+        self.choice = choice
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case proposalId = "proposal_id"
+        case choice
+        case updatedAt = "updated_at"
+    }
+}
+
 // MARK: - Note Info (JSON)
 
 /// Note information for voting eligibility.
