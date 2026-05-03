@@ -8,6 +8,7 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 - `SDKSynchronizer.rescanFrom(height:)`: Rescans the chain from the given BlockHeight.
+- `Synchronizer.getTreeState(height:)`: Fetches the commitment tree state at the given block height from lightwalletd and returns the protobuf-serialized `TreeState` bytes, for app-layer consumers that need to hand tree state to an external component (for example, witness generation via FFI). A throwing default implementation keeps the addition source-compatible for downstream `Synchronizer` conformers.
 
 # 2.4.9 - 2026-04-04
 
