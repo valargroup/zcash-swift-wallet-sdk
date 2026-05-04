@@ -97,8 +97,7 @@ pub unsafe extern "C" fn zcashlc_voting_free_round_state(ptr: *mut FfiRoundState
 ///
 /// # Safety
 ///
-/// - `ptr` must be non-null and must point to a struct returned by
-///   `zcashlc_voting_generate_hotkey` or `zcashlc_voting_generate_hotkey_standalone`.
+/// - `ptr` must be non-null and must point to a struct returned by the voting FFI.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zcashlc_voting_free_hotkey(ptr: *mut FfiVotingHotkey) {
     if !ptr.is_null() {
