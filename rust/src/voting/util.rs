@@ -1,6 +1,3 @@
-use std::ffi::CString;
-use std::os::raw::c_char;
-
 use anyhow::anyhow;
 use ffi_helpers::panic::catch_panic;
 use prost::Message;
@@ -12,10 +9,8 @@ use zip32::AccountId;
 
 use crate::{unwrap_exc_or, unwrap_exc_or_null};
 
-use super::ffi_types::FfiVotingHotkey;
 use super::helpers::{
     bytes_from_ptr, derive_hotkey_side_inputs, json_to_boxed_slice, str_from_ptr, usk_from_seed,
-    voting_hotkey_to_ffi,
 };
 use super::json::{JsonDelegationInputs, JsonWitnessData};
 
@@ -33,28 +28,6 @@ pub unsafe extern "C" fn zcashlc_voting_warm_proving_caches() -> i32 {
         Ok(0)
     });
     unwrap_exc_or(res, -1)
-}
-
-/// Generate a standalone voting hotkey (no database needed).
-///
-/// Returns a pointer to `FfiVotingHotkey` on success, or null on error.
-/// Call `zcashlc_voting_free_hotkey` to free the returned pointer.
-///
-/// # Safety
-///
-/// - `seed` must be non-null and valid for reads for `seed_len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn zcashlc_voting_generate_hotkey_standalone(
-    seed: *const u8,
-    seed_len: usize,
-) -> *mut FfiVotingHotkey {
-    let res = catch_panic(|| {
-        let seed_bytes = unsafe { bytes_from_ptr(seed, seed_len) };
-        let hotkey = voting::hotkey::generate_hotkey(seed_bytes)
-            .map_err(|e| anyhow!("generate_hotkey failed: {}", e))?;
-        Ok(Box::into_raw(Box::new(voting_hotkey_to_ffi(hotkey)?)))
-    });
-    unwrap_exc_or_null(res)
 }
 
 /// Decompose a weight into power-of-two components.
@@ -329,22 +302,4 @@ pub unsafe extern "C" fn zcashlc_voting_verify_witness(
         Ok(if valid { 1 } else { 0 })
     });
     unwrap_exc_or(res, -1)
-}
-
-/// Return the voting FFI version string.
-///
-/// The caller must free the returned string with `zcashlc_string_free`.
-///
-/// # Safety
-///
-/// No pointer parameters.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn zcashlc_voting_version() -> *mut c_char {
-    let res = catch_panic(|| {
-        let version = env!("CARGO_PKG_VERSION");
-        let c_str = CString::new(version)
-            .map_err(|e| anyhow!("version string contains null byte: {}", e))?;
-        Ok(c_str.into_raw())
-    });
-    unwrap_exc_or_null(res)
 }
