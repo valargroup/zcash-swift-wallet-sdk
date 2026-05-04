@@ -1269,19 +1269,6 @@ extension VotingRustBackend {
         }
     }
 
-    /// Generate a standalone voting hotkey (no database).
-    public static func generateHotkeyStandalone(seed: [UInt8]) throws -> VotingHotkey {
-        let ptr = seed.withUnsafeBufferPointer { buf in
-            zcashlc_voting_generate_hotkey_standalone(buf.baseAddress, UInt(buf.count))
-        }
-
-        guard let ptr else {
-            throw VotingRustBackendError.rustError(staticLastErrorMessage(fallback: "`generate_hotkey_standalone` failed"))
-        }
-        defer { zcashlc_voting_free_hotkey(ptr) }
-        return hotkeyFromFfi(ptr.pointee)
-    }
-
     /// Decompose a weight into power-of-two components.
     public static func decomposeWeight(_ weight: UInt64) throws -> [UInt64] {
         guard let ptr = zcashlc_voting_decompose_weight(weight) else {
@@ -1482,12 +1469,6 @@ extension VotingRustBackend {
         return result == 1
     }
 
-    /// Get the voting FFI version string.
-    public static func version() -> String? {
-        guard let cStr = zcashlc_voting_version() else { return nil }
-        defer { zcashlc_string_free(cStr) }
-        return String(validatingUTF8: cStr)
-    }
 }
 
 // MARK: - Private helpers
