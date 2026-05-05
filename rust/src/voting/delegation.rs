@@ -10,7 +10,7 @@ use super::helpers::bytes_from_ptr;
 
 /// Validate a PIR-fetched IMT non-membership proof bytewise.
 ///
-/// Inputs are the wire format of `pir_client::ImtProofData`: 32-byte LE
+/// Inputs are the wire format of `zcash_voting::ImtProofData`: 32-byte LE
 /// pallas::Base values for the root and the three nf_bounds, a u32 leaf
 /// position, and 29 32-byte path siblings.
 ///
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn zcashlc_voting_validate_pir_proof(
             .try_into()
             .map_err(|_| anyhow!("expected_root must be exactly 32 bytes"))?;
 
-        let proof = pir_client::ImtProofData {
+        let proof = zcash_voting::ImtProofData {
             root: parse_base(&root_bytes, "root")?,
             nf_bounds: [
                 parse_base(&nf_bounds_bytes[0..32], "nf_bounds[0]")?,

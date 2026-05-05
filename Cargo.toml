@@ -81,9 +81,8 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 # - The "static" feature is required for the "compression" default feature of arti-client.
 xz2 = { version = "0.1", features = ["static"] }
 
-# Voting
-pir-client = "0.1"
-zcash_voting = { version = "0.4.1", default-features = false, features = ["client-pir"] }
+# Pure-crypto + transport-agnostic PIR proof validation/client surface.
+zcash_voting = { version = "0.5", default-features = false, features = ["client-pir"] }
 
 [build-dependencies]
 bindgen = "0.72"
