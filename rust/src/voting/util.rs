@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use ffi_helpers::panic::catch_panic;
 use prost::Message;
+use std::sync::OnceLock;
 use zcash_client_backend::proto::service::TreeState;
 use zcash_keys::keys::UnifiedFullViewingKey;
 use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
@@ -28,6 +29,57 @@ pub unsafe extern "C" fn zcashlc_voting_warm_proving_caches() -> i32 {
         Ok(0)
     });
     unwrap_exc_or(res, -1)
+}
+
+/// Ballot divisor in zatoshi, from zcash_voting semantics.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_ballot_divisor_zatoshi() -> u64 {
+    ballot_divisor_zatoshi()
+}
+
+fn ballot_divisor_zatoshi() -> u64 {
+    static BALLOT_DIVISOR: OnceLock<u64> = OnceLock::new();
+    *BALLOT_DIVISOR.get_or_init(infer_ballot_divisor_zatoshi)
+}
+
+// The current Swift SDK dependency points at a zcash_voting release where
+// BALLOT_DIVISOR is still crate-private. Derive the divisor from the public
+// chunking behavior so app code has one source of truth until the dependency can
+// be bumped to a release that exposes zcash_voting::BALLOT_DIVISOR directly.
+fn infer_ballot_divisor_zatoshi() -> u64 {
+    let mut low = 0;
+    let mut high = 1;
+    while quantized_single_note_weight(high) == 0 {
+        high = high
+            .checked_mul(2)
+            .expect("ballot divisor exceeded u64 search range");
+    }
+
+    while low + 1 < high {
+        let mid = low + ((high - low) / 2);
+        if quantized_single_note_weight(mid) == 0 {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+
+    high
+}
+
+fn quantized_single_note_weight(value: u64) -> u64 {
+    voting::types::chunk_notes(&[voting::types::NoteInfo {
+        commitment: vec![0; 32],
+        nullifier: vec![0; 32],
+        value,
+        position: 0,
+        diversifier: Vec::new(),
+        rho: Vec::new(),
+        rseed: Vec::new(),
+        scope: 0,
+        ufvk_str: String::new(),
+    }])
+    .eligible_weight
 }
 
 /// Decompose a weight into power-of-two components.
