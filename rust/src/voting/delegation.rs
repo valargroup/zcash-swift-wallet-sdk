@@ -1,4 +1,5 @@
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use ffi_helpers::panic::catch_panic;
@@ -348,6 +349,17 @@ pub unsafe extern "C" fn zcashlc_voting_generate_note_witnesses(
 // VotingDatabase methods — Delegation proof
 // =============================================================================
 
+// Keep PIR client construction at the SDK boundary so zcash_voting can accept
+// an injected transport. Today we use direct Hyper/Rustls; later this is the
+// single place to swap in a Tor-backed transport based on SDK configuration.
+fn connect_pir_client(pir_url: &str) -> anyhow::Result<voting::PirClientBlocking> {
+    voting::PirClientBlocking::with_transport(
+        pir_url,
+        Arc::new(voting::HyperTransport::new()),
+    )
+    .map_err(|e| anyhow!("connect to PIR server failed: {}", e))
+}
+
 /// Precompute and cache delegation PIR IMT proofs for ZKP #1.
 ///
 /// Returns JSON-encoded `DelegationPirPrecomputeResult` as `*mut FfiBoxedSlice`, or null on error.
@@ -376,6 +388,7 @@ pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
         let json_notes: Vec<JsonNoteInfo> = serde_json::from_slice(notes_bytes)?;
         let core_notes: Vec<voting::NoteInfo> = json_notes.into_iter().map(Into::into).collect();
         let pir_url = unsafe { str_from_ptr(pir_server_url, pir_server_url_len) }?;
+        let pir_client = connect_pir_client(&pir_url)?;
 
         let result = handle
             .db
@@ -383,7 +396,7 @@ pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
                 &round_id_str,
                 bundle_index,
                 &core_notes,
-                &pir_url,
+                &pir_client,
                 network_id,
             )
             .map_err(|e| anyhow!("precompute_delegation_pir failed: {}", e))?;
@@ -430,6 +443,7 @@ pub unsafe extern "C" fn zcashlc_voting_build_and_prove_delegation(
         let core_notes: Vec<voting::NoteInfo> = json_notes.into_iter().map(Into::into).collect();
         let hotkey_addr = unsafe { bytes_from_ptr(hotkey_raw_address, hotkey_raw_address_len) };
         let pir_url = unsafe { str_from_ptr(pir_server_url, pir_server_url_len) }?;
+        let pir_client = connect_pir_client(&pir_url)?;
 
         let reporter: Box<dyn voting::ProofProgressReporter> = match progress_callback {
             Some(cb) => Box::new(ProgressBridge {
@@ -446,7 +460,7 @@ pub unsafe extern "C" fn zcashlc_voting_build_and_prove_delegation(
                 bundle_index,
                 &core_notes,
                 hotkey_addr,
-                &pir_url,
+                &pir_client,
                 network_id,
                 reporter.as_ref(),
             )
