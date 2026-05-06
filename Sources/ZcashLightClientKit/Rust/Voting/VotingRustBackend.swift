@@ -1261,6 +1261,11 @@ extension VotingRustBackend {
 // MARK: - Static / free functions (no database needed)
 
 extension VotingRustBackend {
+    /// Ballot divisor in zatoshi, from zcash_voting semantics.
+    public static func ballotDivisorZatoshi() -> UInt64 {
+        zcashlc_voting_ballot_divisor_zatoshi()
+    }
+
     /// Warm process-lifetime proving-key caches used by voting proofs.
     public static func warmProvingCaches() throws {
         let result = zcashlc_voting_warm_proving_caches()
