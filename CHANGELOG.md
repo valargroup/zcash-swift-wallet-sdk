@@ -7,6 +7,7 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 # Unreleased
 
 ## Added
+- Shielded voting Swift shell: `VotingRustBackendWelding`, `VotingRustBackend`, `VotingRustBackendHelpers`, and `VotingRustBackendError`. In-memory `open` / `close` / `setWalletId` lifecycle under `NSLock` only; no `libzcashlc` voting symbols are called yet (FFI wiring tracked in #1661).
 - `SDKSynchronizer.rescanFrom(height:)`: Rescans the chain from the given BlockHeight.
 - `SynchronizerState.fullyScannedHeight`: Contiguous-from-birthday scan high-water mark published on `stateStream`/`latestState`. Callers that need an authoritative view of the wallet's note and nullifier state at a specific height (for example, balance anchored at a poll snapshot) should gate on this rather than `latestBlockHeight` (chain tip) or `maxScannedHeight` (head-first scan progress, which can race ahead under Spend-before-Sync).
 - `Synchronizer.getTreeState(height:)`: Fetches the commitment tree state at the given block height from lightwalletd and returns the protobuf-serialized `TreeState` bytes, for app-layer consumers that need to hand tree state to an external component (for example, witness generation via FFI). A throwing default implementation keeps the addition source-compatible for downstream `Synchronizer` conformers.
