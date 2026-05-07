@@ -1,0 +1,41 @@
+name: Enable Auto-Merge
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-auto-merge:
+    name: Enable auto-merge
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.base.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enable auto-merge after approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          review_decision="$(gh pr view "$PR_URL" --json reviewDecision --jq '.reviewDecision')"
+
+          if [[ "$review_decision" != "APPROVED" ]]; then
+            echo "PR review decision is ${review_decision:-not available}; auto-merge will not be enabled yet."
+            exit 0
+          fi
+
+          gh pr merge "$PR_URL" --auto --squash
