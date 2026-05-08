@@ -83,6 +83,7 @@ rust_decimal = { version = "1", default-features = false, features = ["c-repr"] 
 xz2 = { version = "0.1", features = ["static"] }
 
 # Voting
+incrementalmerkletree = "0.8.2"
 zcash_voting = { version = "0.5.3", default-features = false, features = [
     "client-pir",
     "client-tree-sync",

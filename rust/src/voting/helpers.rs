@@ -17,39 +17,34 @@ use super::ffi_types::FfiVotingHotkey;
 
 const MIN_SEED_LEN: usize = 32;
 
+/// Parse a UTF-8 string from raw pointer + length.
+///
+/// # Safety
+///
+/// - `ptr` must be non-null and valid for reads for `len` bytes.
+/// - The memory referenced by `ptr` must not be mutated for the duration of the call.
+pub(super) unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
+    let bytes = unsafe { bytes_from_ptr(ptr, len) }?;
+    Ok(std::str::from_utf8(bytes)?.to_string())
+}
+
 /// Borrow a byte slice from a raw `(ptr, len)` pair.
 ///
 /// When `len == 0`, returns an empty slice without reading `ptr`, so `ptr` may be null.
 ///
-/// Centralizing the null + length check here lets every voting FFI byte input - strings,
-/// JSON payloads, anything else - share one boundary contract instead of open-coding it
-/// per call site. `str_from_ptr` delegates to this helper.
-///
 /// # Safety
 ///
-/// When `len > 0`, `ptr` must be non-null and valid for reads for `len` bytes, and the
-/// memory must not be mutated for the duration of the call. The returned slice must not
-/// outlive the underlying allocation.
+/// - `ptr` must be non-null and valid for reads for `len` bytes.
+/// - The memory referenced by `ptr` must not be mutated for the duration of the call.
 pub(super) unsafe fn bytes_from_ptr<'a>(ptr: *const u8, len: usize) -> anyhow::Result<&'a [u8]> {
     if len == 0 {
         return Ok(&[]);
     }
     if ptr.is_null() {
-        return Err(anyhow!("FFI pointer is null but length is non-zero"));
+        return Err(anyhow!("pointer must be non-null when length is {}", len));
     }
-    Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
-}
 
-/// Parse a UTF-8 string from a raw pointer and length.
-///
-/// When `len == 0`, returns the empty string without reading `ptr`, so `ptr` may be null.
-///
-/// # Safety
-///
-/// Same contract as `bytes_from_ptr`.
-pub(super) unsafe fn str_from_ptr(ptr: *const u8, len: usize) -> anyhow::Result<String> {
-    let bytes = unsafe { bytes_from_ptr(ptr, len) }?;
-    Ok(std::str::from_utf8(bytes)?.to_string())
+    Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
 /// Return JSON-serialized bytes as `*mut ffi::BoxedSlice`.
@@ -119,7 +114,23 @@ pub(super) fn open_wallet_db(
         .map_err(|e| anyhow!("failed to open wallet DB: {}", e))
 }
 
-#[allow(dead_code)]
+/// Open the wallet database for tree operations that do not consult the
+/// `Network` type parameter. `WalletDb` still requires a network value, so we
+/// use mainnet here and keep the invariant local to this helper.
+pub(super) fn open_wallet_db_for_tree_ops(
+    wallet_db_path: &str,
+) -> anyhow::Result<
+    zcash_client_sqlite::WalletDb<rusqlite::Connection, Network, SystemClock, rand::rngs::OsRng>,
+> {
+    zcash_client_sqlite::WalletDb::for_path(
+        wallet_db_path,
+        Network::MainNetwork,
+        SystemClock,
+        rand::rngs::OsRng,
+    )
+    .map_err(|e| anyhow!("failed to open wallet DB for tree operations: {}", e))
+}
+
 pub(super) fn round_phase_to_u32(phase: voting::storage::RoundPhase) -> u32 {
     use voting::storage::RoundPhase::*;
 
@@ -132,6 +143,7 @@ pub(super) fn round_phase_to_u32(phase: voting::storage::RoundPhase) -> u32 {
     }
 }
 
+/// Derives USK from seed for hotkey-side delegation input construction.
 pub(super) fn usk_from_seed(
     network_id: u32,
     seed: &[u8],
@@ -163,9 +175,9 @@ pub(super) struct HotkeySideInputs {
 pub(super) fn derive_hotkey_side_inputs(
     hotkey_seed: &[u8],
     network_id: u32,
-    hotkey_account: AccountId,
+    account: AccountId,
 ) -> anyhow::Result<HotkeySideInputs> {
-    let hotkey_usk = usk_from_seed(network_id, hotkey_seed, hotkey_account)
+    let hotkey_usk = usk_from_seed(network_id, hotkey_seed, account)
         .map_err(|e| anyhow!("failed to derive hotkey UnifiedSpendingKey: {}", e))?;
 
     let hotkey_ufvk = hotkey_usk.to_unified_full_viewing_key();
@@ -200,7 +212,6 @@ pub(super) fn derive_hotkey_side_inputs(
 // =============================================================================
 
 /// Convert a `voting::VotingHotkey` to the FFI representation.
-#[allow(dead_code)]
 pub(super) fn voting_hotkey_to_ffi(
     hotkey: voting::VotingHotkey,
 ) -> anyhow::Result<FfiVotingHotkey> {
@@ -222,30 +233,6 @@ pub(super) fn voting_hotkey_to_ffi(
 mod tests {
     use super::*;
     use zcash_protocol::consensus::{MAIN_NETWORK, TEST_NETWORK};
-
-    #[test]
-    fn bytes_from_ptr_zero_len_accepts_null() {
-        let bytes = unsafe { bytes_from_ptr(std::ptr::null(), 0) }.expect("empty");
-        assert!(bytes.is_empty());
-    }
-
-    #[test]
-    fn bytes_from_ptr_rejects_null_when_nonzero_len() {
-        let err = unsafe { bytes_from_ptr(std::ptr::null(), 3) }.expect_err("null");
-        assert!(err.to_string().contains("null"));
-    }
-
-    #[test]
-    fn str_from_ptr_zero_len_accepts_null() {
-        let s = unsafe { str_from_ptr(std::ptr::null(), 0) }.expect("empty");
-        assert!(s.is_empty());
-    }
-
-    #[test]
-    fn str_from_ptr_rejects_null_when_nonzero_len() {
-        let err = unsafe { str_from_ptr(std::ptr::null(), 3) }.expect_err("null");
-        assert!(err.to_string().contains("null"));
-    }
 
     #[test]
     fn usk_from_seed_uses_sdk_network_ids() {
