@@ -5,6 +5,10 @@ on:
   # The branch selected in the GitHub UI determines which commit is built.
   workflow_dispatch:
     inputs:
+      target_ref:
+        description: 'Git ref to build and publish (e.g., shielded-vote-2.4.10)'
+        required: true
+        default: 'shielded-vote-2.4.10'
       tag_name:
         description: 'Release tag to create or update (e.g., shielded-vote-2.4.10-testflight.5)'
         required: true
@@ -28,7 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event.inputs.target_ref }}
           persist-credentials: false
+
+      - name: Record build commit
+        id: build-ref
+        run: |
+          set -euo pipefail
+
+          BUILD_SHA=$(git rev-parse HEAD)
+          echo "sha=${BUILD_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "Building ${BUILD_SHA} from ${{ github.event.inputs.target_ref }}"
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
@@ -106,11 +120,12 @@ jobs:
           RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
           ASSET_PATH: ${{ steps.archive.outputs.asset_path }}
           CHECKSUM: ${{ steps.archive.outputs.checksum }}
+          BUILD_SHA: ${{ steps.build-ref.outputs.sha }}
         run: |
           set -euo pipefail
 
           if [[ -z "${RELEASE_NOTES}" ]]; then
-            RELEASE_NOTES="Temporary TestFlight binary artifact for shielded voting SDK commit ${GITHUB_SHA}. Built as a static-library XCFramework so zodl-ios can consume matching voting FFI headers without the local framework-wrapper dSYM issue.
+            RELEASE_NOTES="Temporary TestFlight binary artifact for shielded voting SDK commit ${BUILD_SHA}. Built as a static-library XCFramework so zodl-ios can consume matching voting FFI headers without the local framework-wrapper dSYM issue.
 
           SHA-256: ${CHECKSUM}"
           fi
@@ -130,7 +145,7 @@ jobs:
           else
             gh release create "${TAG_NAME}" "${ASSET_PATH}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --target "${GITHUB_SHA}" \
+              --target "${BUILD_SHA}" \
               --title "${TAG_NAME}" \
               --notes "${RELEASE_NOTES}"
           fi
