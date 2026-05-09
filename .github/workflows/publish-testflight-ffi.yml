@@ -1,0 +1,138 @@
+name: Publish TestFlight FFI Release
+
+on:
+  # Manual trigger for temporary branch artifacts.
+  # The branch selected in the GitHub UI determines which commit is built.
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to create or update (e.g., shielded-vote-2.4.10-testflight.5)'
+        required: true
+      overwrite_existing_release:
+        description: 'Replace libzcashlc.xcframework.zip if the release already exists'
+        required: true
+        type: boolean
+        default: false
+      release_notes:
+        description: 'Optional release notes. Defaults to TestFlight artifact notes for this commit.'
+        required: false
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: macos-15
+    permissions:
+      contents: write # Required for creating releases and uploading assets
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-ios, x86_64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-darwin, aarch64-apple-darwin
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+
+      - name: Build static-library XCFramework
+        run: |
+          set -euo pipefail
+
+          cd BuildSupport
+          make clean
+          make ios-device ios-simulator macos
+          cd ..
+
+          rm -rf BuildSupport/products/static-headers
+          mkdir -p BuildSupport/products/static-headers
+          cp -R target/Headers/. BuildSupport/products/static-headers/
+          cat > BuildSupport/products/static-headers/module.modulemap <<'EOF'
+          module libzcashlc {
+            umbrella header "zcashlc.h"
+
+            export *
+            module * { export * }
+          }
+          EOF
+
+          rm -rf BuildSupport/products/libzcashlc.xcframework
+          xcodebuild -create-xcframework \
+            -library BuildSupport/products/ios-device/universal/libzcashlc.a \
+            -headers BuildSupport/products/static-headers \
+            -library BuildSupport/products/ios-simulator/universal/libzcashlc.a \
+            -headers BuildSupport/products/static-headers \
+            -library BuildSupport/products/macos/universal/libzcashlc.a \
+            -headers BuildSupport/products/static-headers \
+            -output BuildSupport/products/libzcashlc.xcframework
+
+      - name: Verify Swift builds against this Rust artifact
+        run: |
+          set -euo pipefail
+
+          rm -rf LocalPackages
+          mkdir -p LocalPackages
+          cp -R BuildSupport/products/libzcashlc.xcframework LocalPackages/
+          cp BuildSupport/LocalPackages-Package.swift LocalPackages/Package.swift
+
+          swift build -v
+
+      - name: Archive XCFramework
+        id: archive
+        run: |
+          set -euo pipefail
+
+          cd BuildSupport/products
+          rm -f libzcashlc.xcframework.zip
+          zip -r libzcashlc.xcframework.zip libzcashlc.xcframework
+          CHECKSUM=$(shasum -a 256 libzcashlc.xcframework.zip | awk '{print $1}')
+          echo "checksum=${CHECKSUM}" >> "${GITHUB_OUTPUT}"
+          echo "asset_path=BuildSupport/products/libzcashlc.xcframework.zip" >> "${GITHUB_OUTPUT}"
+          echo "Built libzcashlc.xcframework.zip"
+          echo "Checksum: ${CHECKSUM}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.inputs.tag_name }}
+          OVERWRITE_EXISTING_RELEASE: ${{ github.event.inputs.overwrite_existing_release }}
+          RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
+          ASSET_PATH: ${{ steps.archive.outputs.asset_path }}
+          CHECKSUM: ${{ steps.archive.outputs.checksum }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RELEASE_NOTES}" ]]; then
+            RELEASE_NOTES="Temporary TestFlight binary artifact for shielded voting SDK commit ${GITHUB_SHA}. Built as a static-library XCFramework so zodl-ios can consume matching voting FFI headers without the local framework-wrapper dSYM issue.
+
+          SHA-256: ${CHECKSUM}"
+          fi
+
+          if gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            if [[ "${OVERWRITE_EXISTING_RELEASE}" != "true" ]]; then
+              echo "Release ${TAG_NAME} already exists. Re-run with overwrite_existing_release=true to replace the asset."
+              exit 1
+            fi
+
+            gh release upload "${TAG_NAME}" "${ASSET_PATH}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+            gh release edit "${TAG_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --notes "${RELEASE_NOTES}"
+          else
+            gh release create "${TAG_NAME}" "${ASSET_PATH}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "${TAG_NAME}" \
+              --notes "${RELEASE_NOTES}"
+          fi
+
+          echo "Published: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}"
