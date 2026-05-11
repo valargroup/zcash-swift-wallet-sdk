@@ -362,6 +362,16 @@ public class SDKSynchronizer: Synchronizer {
         keySource: String?,
         birthday: BlockHeight? = nil
     ) async throws -> AccountUUID {
+        // Stop sync if running
+        let status = await self.status
+        var stopped = false
+        if status != .stopped && status != .disconnected {
+            await blockProcessor.stop()
+            await exchangeRateTor?.sleep()
+            await httpTor?.sleep()
+            stopped = true
+        }
+
         // called when a new account is imported
         let chainTip = try? await UInt32(
             initializer.lightWalletService.latestBlockHeight(
@@ -374,7 +384,7 @@ public class SDKSynchronizer: Synchronizer {
         guard let chainTip else {
             throw ZcashError.synchronizerNotPrepared
         }
-        
+
         let checkpoint = checkpointSource.birthday(for: birthday ?? BlockHeight(chainTip))
 
         let accountUUID = try await initializer.rustBackend.importAccount(
@@ -387,8 +397,11 @@ public class SDKSynchronizer: Synchronizer {
             name: name,
             keySource: keySource
         )
-        
-        try await initializer.rustBackend.rewindToChainState(chainState: checkpoint.treeState())
+
+        // Restart sync
+        if stopped {
+            try await start(retry: false)
+        }
 
         return accountUUID
     }
@@ -676,7 +689,7 @@ public class SDKSynchronizer: Synchronizer {
 
         let checkpoint = checkpointSource.birthday(for: height)
 
-        try await initializer.rustBackend.rewindToChainState(chainState: checkpoint.treeState())
+        try await initializer.rustBackend.truncateToChainState(chainState: checkpoint.treeState())
     }
     
     // MARK: Rewind
