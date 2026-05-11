@@ -13,6 +13,7 @@ use zcash_voting::{self as voting, zkp1};
 
 use crate::{unwrap_exc_or, unwrap_exc_or_null};
 
+use super::constants::SEED_FINGERPRINT_LEN;
 use super::db::VotingDatabaseHandle;
 use super::ffi_types::{FfiBundleSetupResult, FfiVotingHotkey};
 use super::helpers::{bytes_from_ptr, json_to_boxed_slice, str_from_ptr, voting_hotkey_to_ffi};
@@ -130,7 +131,7 @@ pub unsafe extern "C" fn zcashlc_voting_setup_bundles(
 
 /// Get the number of bundles for a round.
 ///
-/// Returns the bundle count on success (>= 0), or -1 on error.
+/// Returns the bundle count on success, or -1 on error.
 ///
 /// # Safety
 ///
@@ -198,9 +199,10 @@ pub unsafe extern "C" fn zcashlc_voting_build_pczt(
         let fvk = unsafe { bytes_from_ptr(fvk_bytes, fvk_bytes_len) }?;
         let hotkey_addr = unsafe { bytes_from_ptr(hotkey_raw_address, hotkey_raw_address_len) }?;
         let seed_fp_bytes = unsafe { bytes_from_ptr(seed_fingerprint, seed_fingerprint_len) }?;
-        let seed_fp_32: [u8; 32] = seed_fp_bytes.try_into().map_err(|_| {
+        let seed_fp_32: [u8; SEED_FINGERPRINT_LEN] = seed_fp_bytes.try_into().map_err(|_| {
             anyhow!(
-                "seed_fingerprint must be 32 bytes, got {}",
+                "seed_fingerprint must be {} bytes, got {}",
+                SEED_FINGERPRINT_LEN,
                 seed_fp_bytes.len()
             )
         })?;
@@ -260,7 +262,8 @@ pub unsafe extern "C" fn zcashlc_voting_store_tree_state(
     unwrap_exc_or(res, -1)
 }
 
-/// Generate Merkle inclusion witnesses for notes in a bundle.
+/// Generate Merkle inclusion witnesses for the notes in a bundle and cache
+/// them in the voting DB.
 ///
 /// `notes_json` is a JSON-encoded `Vec<NoteInfo>`.
 ///
@@ -446,6 +449,7 @@ pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
     let res = catch_panic(|| {
         let handle =
             unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        crate::parse_network(network_id)?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let notes_bytes = unsafe { bytes_from_ptr(notes_json, notes_json_len) }?;
         let json_notes: Vec<JsonNoteInfo> = serde_json::from_slice(notes_bytes)?;
@@ -477,8 +481,16 @@ pub unsafe extern "C" fn zcashlc_voting_precompute_delegation_pir(
 /// # Safety
 ///
 /// - `db` must be a valid, non-null `VotingDatabaseHandle` pointer.
-/// - `progress_callback` must be a valid function pointer (or null to skip progress).
-/// - `progress_context` is passed through to the callback unchanged.
+/// - `progress_callback` must be a valid function pointer, or null to skip progress.
+///   If provided, it must remain callable until this function returns. It must be
+///   thread-safe and reentrant; callers must not assume it runs on the main thread,
+///   because progress may be reported from proving worker threads.
+/// - `progress_context` is passed to `progress_callback` unchanged. If non-null,
+///   it must point to state that remains valid until this function returns. The
+///   callback must not store `progress_context` or use it after this function
+///   has returned.
+/// - The callback must not call back into this voting database handle or perform
+///   work that can deadlock or reenter the active proof operation.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn zcashlc_voting_build_and_prove_delegation(
     db: *mut VotingDatabaseHandle,
@@ -500,6 +512,7 @@ pub unsafe extern "C" fn zcashlc_voting_build_and_prove_delegation(
     let res = catch_panic(|| {
         let handle =
             unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        crate::parse_network(network_id)?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let notes_bytes = unsafe { bytes_from_ptr(notes_json, notes_json_len) }?;
         let json_notes: Vec<JsonNoteInfo> = serde_json::from_slice(notes_bytes)?;
@@ -557,6 +570,7 @@ pub unsafe extern "C" fn zcashlc_voting_get_delegation_submission(
     let res = catch_panic(|| {
         let handle =
             unsafe { db.as_ref() }.ok_or_else(|| anyhow!("VotingDatabaseHandle is null"))?;
+        crate::parse_network(network_id)?;
         let round_id_str = unsafe { str_from_ptr(round_id, round_id_len) }?;
         let seed = unsafe { bytes_from_ptr(sender_seed, sender_seed_len) }?;
 
@@ -748,6 +762,9 @@ mod tests {
     use zcash_voting::storage::queries;
 
     use crate::ffi::zcashlc_free_boxed_slice;
+    use crate::voting::ffi_types::{
+        zcashlc_voting_free_bundle_setup_result, zcashlc_voting_free_hotkey,
+    };
     use crate::voting::{
         zcashlc_voting_db_free, zcashlc_voting_db_open, zcashlc_voting_set_wallet_id,
     };
@@ -846,6 +863,25 @@ mod tests {
         });
 
         db
+    }
+
+    fn init_test_round(db: *mut VotingDatabaseHandle) {
+        let handle = unsafe { db.as_ref() }.expect("db handle");
+        handle
+            .db
+            .init_round(&round_params(100, vec![7; 32]), None)
+            .expect("insert round");
+    }
+
+    fn insert_test_bundle(db: *mut VotingDatabaseHandle, bundle_index: u32) {
+        let handle = unsafe { db.as_ref() }.expect("db handle");
+        let wallet_id = handle.db.wallet_id();
+        let conn = handle.db.conn();
+        conn.execute(
+            "INSERT INTO bundles (round_id, wallet_id, bundle_index) VALUES (?1, ?2, ?3)",
+            rusqlite::params![TEST_ROUND_ID, wallet_id, i64::from(bundle_index)],
+        )
+        .expect("insert bundle");
     }
 
     fn merkle_hash(tag: u64) -> MerkleHashOrchard {
@@ -1076,6 +1112,299 @@ mod tests {
             assert_eq!(cached.root, returned.root);
             assert_eq!(cached.auth_path, returned.auth_path);
         }
+    }
+
+    #[test]
+    fn delegation_workflow_ffi_rejects_null_db() {
+        let round = TEST_ROUND_ID.as_bytes();
+        let json = b"[]";
+        let bytes = [0u8; 32];
+
+        assert!(
+            unsafe {
+                zcashlc_voting_generate_hotkey(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                )
+            }
+            .is_null()
+        );
+        assert!(
+            unsafe {
+                zcashlc_voting_setup_bundles(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    json.as_ptr(),
+                    json.len(),
+                )
+            }
+            .is_null()
+        );
+        assert_eq!(
+            unsafe {
+                zcashlc_voting_get_bundle_count(std::ptr::null_mut(), round.as_ptr(), round.len())
+            },
+            -1
+        );
+        assert!(
+            unsafe {
+                zcashlc_voting_build_pczt(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    json.as_ptr(),
+                    json.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    0,
+                    0,
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    0,
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                )
+            }
+            .is_null()
+        );
+        assert_eq!(
+            unsafe {
+                zcashlc_voting_store_tree_state(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                )
+            },
+            -1
+        );
+        assert!(
+            unsafe {
+                zcashlc_voting_build_and_prove_delegation(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    json.as_ptr(),
+                    json.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    round.as_ptr(),
+                    round.len(),
+                    crate::NETWORK_ID_TESTNET,
+                    None,
+                    std::ptr::null_mut(),
+                )
+            }
+            .is_null()
+        );
+        assert!(
+            unsafe {
+                zcashlc_voting_get_delegation_submission(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    crate::NETWORK_ID_TESTNET,
+                    0,
+                )
+            }
+            .is_null()
+        );
+        assert!(
+            unsafe {
+                zcashlc_voting_get_delegation_submission_with_keystone_sig(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                )
+            }
+            .is_null()
+        );
+        assert_eq!(
+            unsafe {
+                zcashlc_voting_store_van_position(
+                    std::ptr::null_mut(),
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    0,
+                )
+            },
+            -1
+        );
+    }
+
+    #[test]
+    fn generate_hotkey_returns_freeable_ffi_value() {
+        let db = open_memory_voting_db();
+        let seed = [7u8; 32];
+        let round = TEST_ROUND_ID.as_bytes();
+
+        let hotkey = unsafe {
+            zcashlc_voting_generate_hotkey(
+                db,
+                round.as_ptr(),
+                round.len(),
+                seed.as_ptr(),
+                seed.len(),
+            )
+        };
+
+        assert!(!hotkey.is_null());
+        let hotkey_ref = unsafe { hotkey.as_ref() }.expect("hotkey");
+        assert_eq!(hotkey_ref.secret_key_len, 32);
+        assert_eq!(hotkey_ref.public_key_len, 32);
+        assert!(!hotkey_ref.secret_key.is_null());
+        assert!(!hotkey_ref.public_key.is_null());
+        assert!(!hotkey_ref.address.is_null());
+
+        unsafe {
+            zcashlc_voting_free_hotkey(hotkey);
+            zcashlc_voting_db_free(db);
+        }
+    }
+
+    #[test]
+    fn generate_hotkey_rejects_short_seed() {
+        let db = open_memory_voting_db();
+        let seed = [7u8; 31];
+        let round = TEST_ROUND_ID.as_bytes();
+
+        let hotkey = unsafe {
+            zcashlc_voting_generate_hotkey(
+                db,
+                round.as_ptr(),
+                round.len(),
+                seed.as_ptr(),
+                seed.len(),
+            )
+        };
+
+        assert!(hotkey.is_null());
+        unsafe { zcashlc_voting_db_free(db) };
+    }
+
+    #[test]
+    fn setup_bundles_and_count_return_freeable_ffi_value() {
+        let db = open_memory_voting_db();
+        init_test_round(db);
+        let round = TEST_ROUND_ID.as_bytes();
+        let notes_json = b"[]";
+
+        let result = unsafe {
+            zcashlc_voting_setup_bundles(
+                db,
+                round.as_ptr(),
+                round.len(),
+                notes_json.as_ptr(),
+                notes_json.len(),
+            )
+        };
+
+        assert!(!result.is_null());
+        let result_ref = unsafe { result.as_ref() }.expect("bundle setup result");
+        assert_eq!(result_ref.bundle_count, 0);
+        assert_eq!(result_ref.eligible_weight, 0);
+        assert_eq!(
+            unsafe { zcashlc_voting_get_bundle_count(db, round.as_ptr(), round.len()) },
+            0
+        );
+
+        unsafe {
+            zcashlc_voting_free_bundle_setup_result(result);
+            zcashlc_voting_db_free(db);
+        }
+    }
+
+    #[test]
+    fn store_tree_state_and_van_position_accept_existing_round_bundle() {
+        let db = open_memory_voting_db();
+        init_test_round(db);
+        insert_test_bundle(db, 0);
+        let round = TEST_ROUND_ID.as_bytes();
+        let tree_state = [1u8, 2, 3];
+
+        assert_eq!(
+            unsafe {
+                zcashlc_voting_store_tree_state(
+                    db,
+                    round.as_ptr(),
+                    round.len(),
+                    tree_state.as_ptr(),
+                    tree_state.len(),
+                )
+            },
+            0
+        );
+        assert_eq!(
+            unsafe { zcashlc_voting_store_van_position(db, round.as_ptr(), round.len(), 0, 42) },
+            0
+        );
+
+        unsafe { zcashlc_voting_db_free(db) };
+    }
+
+    #[test]
+    fn proof_and_submission_calls_reject_invalid_network_id_before_remote_work() {
+        let db = open_memory_voting_db();
+        let round = TEST_ROUND_ID.as_bytes();
+        let notes_json = b"[]";
+        let bytes = [0u8; 32];
+
+        assert!(
+            unsafe {
+                zcashlc_voting_build_and_prove_delegation(
+                    db,
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    notes_json.as_ptr(),
+                    notes_json.len(),
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    b"https://example.com/".as_ptr(),
+                    20,
+                    99,
+                    None,
+                    std::ptr::null_mut(),
+                )
+            }
+            .is_null()
+        );
+        assert!(
+            unsafe {
+                zcashlc_voting_get_delegation_submission(
+                    db,
+                    round.as_ptr(),
+                    round.len(),
+                    0,
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    99,
+                    0,
+                )
+            }
+            .is_null()
+        );
+
+        unsafe { zcashlc_voting_db_free(db) };
     }
 
     #[test]
