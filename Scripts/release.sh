@@ -13,7 +13,7 @@
 #   8. Publishes the GitHub release
 #
 # Arguments:
-#   <remote>   The git remote pointing to zcash/zcash-swift-wallet-sdk
+#   <remote>   The git remote pointing to valargroup/zcash-swift-wallet-sdk
 #              (e.g., 'origin' or 'upstream')
 #   <version>  The version to release (e.g., '2.5.0')
 #
@@ -55,7 +55,7 @@ if ! git remote get-url "$UPSTREAM_REMOTE" &>/dev/null; then
     git remote -v
     exit 1
 fi
-REPO="zcash/zcash-swift-wallet-sdk"
+REPO="valargroup/zcash-swift-wallet-sdk"
 PRODUCTS_DIR="BuildSupport/products"
 
 echo "=== SDK Release ${VERSION} ==="

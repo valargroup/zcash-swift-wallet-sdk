@@ -45,7 +45,7 @@ if [[ -z "$1" ]]; then
 fi
 
 VERSION="$1"
-REPO="zcash/zcash-swift-wallet-sdk"
+REPO="valargroup/zcash-swift-wallet-sdk"
 PRODUCTS_DIR="BuildSupport/products"
 ZIP_FILE="libzcashlc.xcframework.zip"
 
