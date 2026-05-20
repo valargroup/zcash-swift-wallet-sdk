@@ -230,6 +230,55 @@ final class VotingRustBackendTests: XCTestCase {
         )
     }
 
+    func test_planNoteBundles_usesSharedPolicy() throws {
+        let notes = [
+            makeEligibleNote(value: 50_000_000, position: 10),
+            makeEligibleNote(value: 13_000_000, position: 0),
+            makeEligibleNote(value: 50_000_000, position: 12),
+            makeEligibleNote(value: 13_000_000, position: 1),
+            makeEligibleNote(value: 50_000_000, position: 11),
+            makeEligibleNote(value: 13_000_000, position: 2),
+            makeEligibleNote(value: 50_000_000, position: 14),
+            makeEligibleNote(value: 13_000_000, position: 3),
+            makeEligibleNote(value: 50_000_000, position: 13),
+            makeEligibleNote(value: 13_000_000, position: 4)
+        ]
+
+        let plan = try VotingRustBackend.planNoteBundles(notes: notes)
+
+        XCTAssertEqual(plan.eligibleWeight, 312_500_000)
+        XCTAssertEqual(plan.droppedCount, 0)
+        XCTAssertEqual(plan.bundles.map { $0.map(\.position) }, [[10, 11, 12, 13, 14], [0, 1, 2, 3, 4]])
+    }
+
+    func test_pirSnapshotSelection_usesSharedPolicy() throws {
+        let behind = try VotingRustBackend.classifyPirSnapshotHeight(
+            endpoint: "https://behind.example.com",
+            expectedSnapshotHeight: 100,
+            reportedHeight: 99
+        )
+        let firstMatch = try VotingRustBackend.classifyPirSnapshotHeight(
+            endpoint: "https://one.example.com",
+            expectedSnapshotHeight: 100,
+            reportedHeight: 100
+        )
+        let secondMatch = try VotingRustBackend.classifyPirSnapshotHeight(
+            endpoint: "https://two.example.com",
+            expectedSnapshotHeight: 100,
+            reportedHeight: 100
+        )
+
+        let resolution = try VotingRustBackend.selectPirSnapshotEndpointFromMatchIndex(
+            diagnostics: [behind, firstMatch, secondMatch],
+            expectedSnapshotHeight: 100,
+            matchIndex: 5
+        )
+
+        XCTAssertEqual(behind.status, .behind)
+        XCTAssertEqual(resolution.endpoint, "https://two.example.com")
+        XCTAssertEqual(resolution.selectedMatchIndex, 1)
+    }
+
     func test_warmProvingCaches_doesNotThrow() throws {
         XCTAssertNoThrow(try VotingRustBackend.warmProvingCaches())
         XCTAssertNoThrow(try VotingRustBackend.warmProvingCaches())
@@ -1526,12 +1575,15 @@ final class VotingRustBackendTests: XCTestCase {
         XCTAssertEqual(result.bundleCount, 1)
     }
 
-    private func makeEligibleNote() -> VotingNoteInfo {
+    private func makeEligibleNote(
+        value: UInt64 = roundTripEligibleNoteValue,
+        position: UInt64 = 0
+    ) -> VotingNoteInfo {
         VotingNoteInfo(
             commitment: [UInt8](repeating: 0x01, count: votingFieldElementByteCount),
             nullifier: [UInt8](repeating: 0x02, count: votingFieldElementByteCount),
-            value: roundTripEligibleNoteValue,
-            position: 0,
+            value: value,
+            position: position,
             diversifier: [UInt8](repeating: 0, count: roundTripDiversifierByteCount),
             rho: [UInt8](repeating: 0, count: votingFieldElementByteCount),
             rseed: [UInt8](repeating: 0, count: votingFieldElementByteCount),

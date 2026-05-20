@@ -37,20 +37,16 @@ final class PirSnapshotResolverTests: XCTestCase {
         XCTAssertTrue(["https://b", "https://c"].contains(chosen))
     }
 
-    func testMatchingEndpointSelectionOnlyReceivesMatchingCandidates() async throws {
+    func testMatchingEndpointSelectionUsesSharedMatchIndexPolicy() async throws {
         let probe = StubProbe(outcomes: [
             "https://a": .mismatched(height: 90),
             "https://b": .matching(height: 100),
             "https://c": .matching(height: 100),
             "https://d": .unreachable(reason: "timeout")
         ])
-        nonisolated(unsafe) var candidates: [String] = []
         let resolver = PirSnapshotResolver(
             probe: probe,
-            matchingEndpointSelector: { outcomes in
-                candidates = outcomes.map(\.url)
-                return outcomes.last
-            }
+            matchIndexProvider: { 1 }
         )
 
         let chosen = try await resolver.resolve(
@@ -58,7 +54,6 @@ final class PirSnapshotResolverTests: XCTestCase {
             expectedSnapshotHeight: 100
         )
 
-        XCTAssertEqual(candidates, ["https://b", "https://c"])
         XCTAssertEqual(chosen, "https://c")
     }
 

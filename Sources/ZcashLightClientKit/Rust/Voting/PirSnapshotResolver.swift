@@ -57,10 +57,83 @@ public struct PirSnapshotProbeOutcome: Equatable, Sendable {
 
     public let url: String
     public let status: Status
+    private let normalizedDiagnostic: VotingPirSnapshotEndpointDiagnostic?
 
     public init(url: String, status: Status) {
         self.url = url
         self.status = status
+        self.normalizedDiagnostic = nil
+    }
+
+    init(diagnostic: VotingPirSnapshotEndpointDiagnostic) {
+        self.url = diagnostic.endpoint
+        self.normalizedDiagnostic = diagnostic
+
+        switch diagnostic.status {
+        case .matched:
+            self.status = Self.heightStatus(
+                diagnostic.reportedHeight,
+                makeStatus: Status.matching,
+                fallback: "matched response omitted height"
+            )
+        case .behind, .ahead:
+            self.status = Self.heightStatus(
+                diagnostic.reportedHeight,
+                makeStatus: Status.mismatched,
+                fallback: "mismatched response omitted height"
+            )
+        case .missingHeight:
+            self.status = .missingHeight
+        case .malformedJson:
+            self.status = .unreachable(reason: diagnostic.message ?? "malformed JSON")
+        case .nonSuccessStatus:
+            let code = diagnostic.httpStatusCode.map { "HTTP \($0)" } ?? "non-200 HTTP response"
+            self.status = .unreachable(reason: diagnostic.message ?? code)
+        case .timeoutOrNetworkError:
+            self.status = .unreachable(reason: diagnostic.message ?? "network error")
+        }
+    }
+
+    func diagnostic(expectedSnapshotHeight: BlockHeight) -> VotingPirSnapshotEndpointDiagnostic {
+        if let normalizedDiagnostic {
+            return normalizedDiagnostic
+        }
+
+        switch status {
+        case .matching(let height):
+            return VotingPirSnapshotEndpointDiagnostic(
+                endpoint: url,
+                status: .matched,
+                reportedHeight: UInt64(exactly: height),
+                httpStatusCode: nil,
+                message: nil
+            )
+        case .mismatched(let height):
+            let reportedHeight = UInt64(exactly: height)
+            return VotingPirSnapshotEndpointDiagnostic(
+                endpoint: url,
+                status: height < expectedSnapshotHeight ? .behind : .ahead,
+                reportedHeight: reportedHeight,
+                httpStatusCode: nil,
+                message: nil
+            )
+        case .missingHeight:
+            return VotingPirSnapshotEndpointDiagnostic(
+                endpoint: url,
+                status: .missingHeight,
+                reportedHeight: nil,
+                httpStatusCode: nil,
+                message: nil
+            )
+        case .unreachable(let reason):
+            return VotingPirSnapshotEndpointDiagnostic(
+                endpoint: url,
+                status: .timeoutOrNetworkError,
+                reportedHeight: nil,
+                httpStatusCode: nil,
+                message: reason
+            )
+        }
     }
 
     /// Compact description for logs / aggregated error messages.
@@ -76,6 +149,21 @@ public struct PirSnapshotProbeOutcome: Equatable, Sendable {
             return "\(url): unreachable(\(reason))"
         }
     }
+
+    private static func heightStatus(
+        _ reportedHeight: UInt64?,
+        makeStatus: (BlockHeight) -> Status,
+        fallback: String
+    ) -> Status {
+        guard
+            let reportedHeight,
+            let blockHeight = BlockHeight(exactly: reportedHeight)
+        else {
+            return .unreachable(reason: fallback)
+        }
+
+        return makeStatus(blockHeight)
+    }
 }
 
 /// Probes a single PIR endpoint's `/root` and reports its snapshot status.
@@ -90,19 +178,19 @@ public protocol PirSnapshotProbing: Sendable {
 /// Selects a PIR endpoint whose served snapshot height equals `expectedSnapshotHeight` exactly.
 public struct PirSnapshotResolver: Sendable {
     private let probe: PirSnapshotProbing
-    private let matchingEndpointSelector: @Sendable ([PirSnapshotProbeOutcome]) -> PirSnapshotProbeOutcome?
+    private let matchIndexProvider: @Sendable () throws -> UInt64
 
     public init(probe: PirSnapshotProbing = HTTPPirSnapshotProbe()) {
         self.probe = probe
-        matchingEndpointSelector = { $0.randomElement() }
+        matchIndexProvider = { try VotingRustBackend.secureRandomUInt64() }
     }
 
     init(
         probe: PirSnapshotProbing,
-        matchingEndpointSelector: @escaping @Sendable ([PirSnapshotProbeOutcome]) -> PirSnapshotProbeOutcome?
+        matchIndexProvider: @escaping @Sendable () throws -> UInt64
     ) {
         self.probe = probe
-        self.matchingEndpointSelector = matchingEndpointSelector
+        self.matchIndexProvider = matchIndexProvider
     }
 
     /// Probe all `endpoints` in parallel and return a randomly selected URL
@@ -124,6 +212,13 @@ public struct PirSnapshotResolver: Sendable {
             throw PirSnapshotResolverError.noEndpointsConfigured
         }
 
+        guard let expectedSnapshotHeightUInt64 = UInt64(exactly: expectedSnapshotHeight) else {
+            throw PirSnapshotResolverError.noMatchingEndpoint(
+                expected: expectedSnapshotHeight,
+                details: []
+            )
+        }
+
         let outcomes = await withTaskGroup(of: (Int, PirSnapshotProbeOutcome).self) { group in
             for (index, url) in endpoints.enumerated() {
                 group.addTask {
@@ -143,19 +238,22 @@ public struct PirSnapshotResolver: Sendable {
             return collected.map(\.1)
         }
 
-        let matchingOutcomes = outcomes.filter { outcome in
-            if case .matching = outcome.status { return true }
-            return false
+        let diagnostics = outcomes.map {
+            $0.diagnostic(expectedSnapshotHeight: expectedSnapshotHeight)
         }
-        let chosen = matchingEndpointSelector(matchingOutcomes)
-
-        guard let chosen else {
+        do {
+            let resolution = try VotingRustBackend.selectPirSnapshotEndpointFromMatchIndex(
+                diagnostics: diagnostics,
+                expectedSnapshotHeight: expectedSnapshotHeightUInt64,
+                matchIndex: try matchIndexProvider()
+            )
+            return resolution.endpoint
+        } catch {
             throw PirSnapshotResolverError.noMatchingEndpoint(
                 expected: expectedSnapshotHeight,
                 details: outcomes
             )
         }
-        return chosen.url
     }
 }
 
@@ -199,31 +297,50 @@ public struct HTTPPirSnapshotProbe: PirSnapshotProbing {
             )
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
-                return PirSnapshotProbeOutcome(url: url, status: .unreachable(reason: "non-HTTP response"))
+                let diagnostic = VotingPirSnapshotEndpointDiagnostic(
+                    endpoint: url,
+                    status: .timeoutOrNetworkError,
+                    reportedHeight: nil,
+                    httpStatusCode: nil,
+                    message: "non-HTTP response"
+                )
+                return PirSnapshotProbeOutcome(diagnostic: diagnostic)
             }
             guard http.statusCode == 200 else {
-                return PirSnapshotProbeOutcome(
-                    url: url,
-                    status: .unreachable(reason: "HTTP \(http.statusCode)")
+                let diagnostic = VotingPirSnapshotEndpointDiagnostic(
+                    endpoint: url,
+                    status: .nonSuccessStatus,
+                    reportedHeight: nil,
+                    httpStatusCode: UInt16(exactly: http.statusCode),
+                    message: "HTTP \(http.statusCode)"
                 )
+                return PirSnapshotProbeOutcome(diagnostic: diagnostic)
             }
             let info: RootInfo
             do {
                 info = try JSONDecoder().decode(RootInfo.self, from: data)
             } catch {
+                let diagnostic = VotingPirSnapshotEndpointDiagnostic(
+                    endpoint: url,
+                    status: .malformedJson,
+                    reportedHeight: nil,
+                    httpStatusCode: nil,
+                    message: "decode failed: \(error.localizedDescription)"
+                )
+                return PirSnapshotProbeOutcome(diagnostic: diagnostic)
+            }
+            guard let expectedSnapshotHeightUInt64 = UInt64(exactly: expectedSnapshotHeight) else {
                 return PirSnapshotProbeOutcome(
                     url: url,
-                    status: .unreachable(reason: "decode failed: \(error.localizedDescription)")
+                    status: .unreachable(reason: "invalid expected snapshot height")
                 )
             }
-            guard let height = info.height else {
-                return PirSnapshotProbeOutcome(url: url, status: .missingHeight)
-            }
-            if height == expectedSnapshotHeight {
-                return PirSnapshotProbeOutcome(url: url, status: .matching(height: height))
-            } else {
-                return PirSnapshotProbeOutcome(url: url, status: .mismatched(height: height))
-            }
+            let diagnostic = try VotingRustBackend.classifyPirSnapshotHeight(
+                endpoint: url,
+                expectedSnapshotHeight: expectedSnapshotHeightUInt64,
+                reportedHeight: info.height.flatMap(UInt64.init(exactly:))
+            )
+            return PirSnapshotProbeOutcome(diagnostic: diagnostic)
         } catch {
             return PirSnapshotProbeOutcome(
                 url: url,

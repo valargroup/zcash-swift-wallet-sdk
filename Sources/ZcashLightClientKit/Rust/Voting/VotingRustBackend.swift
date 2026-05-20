@@ -1388,6 +1388,98 @@ extension VotingRustBackend {
     }
 }
 
+// MARK: - Note bundling
+
+extension VotingRustBackend {
+    /// Plan value-aware vote-authority note bundles with the shared voting policy.
+    public static func planNoteBundles(notes: [VotingNoteInfo]) throws -> VotingNoteBundlePlan {
+        let notesBytes = [UInt8](try JSONEncoder().encode(notes))
+        return try notesBytes.withUnsafeBufferPointer { notesBuf in
+            try staticJSONFFI(fallback: "`plan_note_bundles` failed") {
+                zcashlc_voting_plan_note_bundles(
+                    notesBuf.baseAddress,
+                    UInt(notesBuf.count)
+                )
+            }
+        }
+    }
+}
+
+// MARK: - PIR snapshot selection
+
+extension VotingRustBackend {
+    /// Classify a parsed PIR endpoint snapshot height with the shared voting policy.
+    public static func classifyPirSnapshotHeight(
+        endpoint: String,
+        expectedSnapshotHeight: UInt64,
+        reportedHeight: UInt64?
+    ) throws -> VotingPirSnapshotEndpointDiagnostic {
+        let endpointBytes = [UInt8](endpoint.utf8)
+        return try endpointBytes.withUnsafeBufferPointer { endpointBuf in
+            try staticJSONFFI(fallback: "`classify_pir_snapshot_height` failed") {
+                zcashlc_voting_classify_pir_snapshot_height(
+                    endpointBuf.baseAddress,
+                    UInt(endpointBuf.count),
+                    expectedSnapshotHeight,
+                    reportedHeight ?? 0,
+                    reportedHeight == nil ? 0 : 1
+                )
+            }
+        }
+    }
+
+    /// Select an exact-height PIR endpoint from normalized diagnostics.
+    ///
+    /// This method draws the selector index from Apple's CSPRNG. Use
+    /// `selectPirSnapshotEndpointFromMatchIndex` when deterministic selection
+    /// is needed for tests.
+    public static func selectPirSnapshotEndpoint(
+        diagnostics: [VotingPirSnapshotEndpointDiagnostic],
+        expectedSnapshotHeight: UInt64
+    ) throws -> VotingPirSnapshotResolution {
+        try selectPirSnapshotEndpointFromMatchIndex(
+            diagnostics: diagnostics,
+            expectedSnapshotHeight: expectedSnapshotHeight,
+            matchIndex: secureRandomUInt64()
+        )
+    }
+
+    /// Select an exact-height PIR endpoint from caller-provided selector entropy.
+    public static func selectPirSnapshotEndpointFromMatchIndex(
+        diagnostics: [VotingPirSnapshotEndpointDiagnostic],
+        expectedSnapshotHeight: UInt64,
+        matchIndex: UInt64
+    ) throws -> VotingPirSnapshotResolution {
+        let diagnosticsBytes = [UInt8](try JSONEncoder().encode(diagnostics))
+        return try diagnosticsBytes.withUnsafeBufferPointer { diagnosticsBuf in
+            try staticJSONFFI(fallback: "`select_pir_snapshot_endpoint` failed") {
+                zcashlc_voting_select_pir_snapshot_endpoint(
+                    diagnosticsBuf.baseAddress,
+                    UInt(diagnosticsBuf.count),
+                    expectedSnapshotHeight,
+                    matchIndex
+                )
+            }
+        }
+    }
+}
+
+extension VotingRustBackend {
+    static func secureRandomUInt64() throws -> UInt64 {
+        var value: UInt64 = 0
+        let status = withUnsafeMutableBytes(of: &value) { bytes in
+            guard let baseAddress = bytes.baseAddress else {
+                return errSecParam
+            }
+            return SecRandomCopyBytes(kSecRandomDefault, bytes.count, baseAddress)
+        }
+        guard status == errSecSuccess else {
+            throw VotingRustBackendError.invalidData("SecRandomCopyBytes failed with status \(status)")
+        }
+        return value
+    }
+}
+
 // MARK: - Share policy
 
 extension VotingRustBackend {

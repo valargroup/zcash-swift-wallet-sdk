@@ -7,6 +7,10 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- `zcashlc_voting_plan_note_bundles`,
+  `zcashlc_voting_classify_pir_snapshot_height`, and
+  `zcashlc_voting_select_pir_snapshot_endpoint` for wallet note bundling and
+  exact-height PIR endpoint policy shared by `zcash_voting`.
 - `zcashlc_voting_share_submission_random_bytes_required`,
   `zcashlc_voting_plan_share_submissions`,
   `zcashlc_voting_resubmission_server_order_random_bytes_required`,
@@ -21,7 +25,8 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation, paginated vote commitment tree sync responses with per-block
   roots, and the shared Orchard note conversion used by
   `zcashlc_voting_get_wallet_notes`, plus shared wallet policy helpers for
-  share submission and tracking. Dropped the unused round ID from
+  note bundling, PIR snapshot selection, share submission, and tracking.
+  Dropped the unused round ID from
   `zcashlc_voting_generate_hotkey`.
 
 ## 2.5.0 - 2026-05-11

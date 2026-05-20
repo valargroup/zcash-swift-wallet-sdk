@@ -64,7 +64,7 @@ public struct VotingVoteRecord: Sendable {
 // MARK: - Note Info (JSON)
 
 /// Note information for voting eligibility.
-public struct VotingNoteInfo: Codable, Sendable {
+public struct VotingNoteInfo: Codable, Equatable, Sendable {
     public let commitment: [UInt8]
     public let nullifier: [UInt8]
     public let value: UInt64
@@ -100,6 +100,91 @@ public struct VotingNoteInfo: Codable, Sendable {
         self.rseed = rseed
         self.scope = scope
         self.ufvkStr = ufvkStr
+    }
+}
+
+// MARK: - Note Bundling
+
+/// Value-aware note bundle plan returned by the shared voting policy.
+public struct VotingNoteBundlePlan: Codable, Equatable, Sendable {
+    public let bundles: [[VotingNoteInfo]]
+    public let eligibleWeight: UInt64
+    public let droppedCount: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case bundles
+        case eligibleWeight = "eligible_weight"
+        case droppedCount = "dropped_count"
+    }
+
+    public init(bundles: [[VotingNoteInfo]], eligibleWeight: UInt64, droppedCount: UInt64) {
+        self.bundles = bundles
+        self.eligibleWeight = eligibleWeight
+        self.droppedCount = droppedCount
+    }
+}
+
+// MARK: - PIR Snapshot Selection
+
+/// Normalized status for a PIR endpoint's served snapshot height.
+public enum VotingPirSnapshotEndpointStatus: String, Codable, Equatable, Sendable {
+    case matched
+    case behind
+    case ahead
+    case missingHeight = "missing_height"
+    case malformedJson = "malformed_json"
+    case nonSuccessStatus = "non_success_status"
+    case timeoutOrNetworkError = "timeout_or_network_error"
+}
+
+/// Diagnostic for one configured PIR endpoint probe.
+public struct VotingPirSnapshotEndpointDiagnostic: Codable, Equatable, Sendable {
+    public let endpoint: String
+    public let status: VotingPirSnapshotEndpointStatus
+    public let reportedHeight: UInt64?
+    public let httpStatusCode: UInt16?
+    public let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case endpoint, status, message
+        case reportedHeight = "reported_height"
+        case httpStatusCode = "http_status_code"
+    }
+
+    public init(
+        endpoint: String,
+        status: VotingPirSnapshotEndpointStatus,
+        reportedHeight: UInt64?,
+        httpStatusCode: UInt16?,
+        message: String?
+    ) {
+        self.endpoint = endpoint
+        self.status = status
+        self.reportedHeight = reportedHeight
+        self.httpStatusCode = httpStatusCode
+        self.message = message
+    }
+}
+
+/// Exact-height PIR endpoint selected by the shared voting policy.
+public struct VotingPirSnapshotResolution: Codable, Equatable, Sendable {
+    public let endpoint: String
+    public let diagnostics: [VotingPirSnapshotEndpointDiagnostic]
+    public let selectedMatchIndex: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case endpoint, diagnostics
+        case selectedMatchIndex = "selected_match_index"
+    }
+
+    public init(
+        endpoint: String,
+        diagnostics: [VotingPirSnapshotEndpointDiagnostic],
+        selectedMatchIndex: UInt64
+    ) {
+        self.endpoint = endpoint
+        self.diagnostics = diagnostics
+        self.selectedMatchIndex = selectedMatchIndex
     }
 }
 
