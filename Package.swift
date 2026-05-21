@@ -6,8 +6,11 @@ import Foundation
 // When LocalPackages/Package.swift exists (created by Scripts/init-local-ffi.sh),
 // the SDK builds against the locally-built FFI instead of the pre-built binary
 // from GitHub Releases. Run `rm -rf LocalPackages` to switch back.
+// Dependency checkouts always use the binary target so local-only path dependencies
+// cannot leak into apps consuming this package through SwiftPM.
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-let useLocalFFI = FileManager.default.fileExists(atPath: packageDir + "/LocalPackages/Package.swift")
+let isSwiftPMCheckout = packageDir.contains("/SourcePackages/checkouts/")
+let useLocalFFI = !isSwiftPMCheckout && FileManager.default.fileExists(atPath: packageDir + "/LocalPackages/Package.swift")
 
 var dependencies: [Package.Dependency] = [
     .package(url: "https://github.com/grpc/grpc-swift.git", from: "1.24.2"),

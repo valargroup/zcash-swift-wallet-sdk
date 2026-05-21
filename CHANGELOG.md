@@ -10,6 +10,10 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `VotingRustBackend` share workflow planner methods for crate-owned
   share mode, per-share `submitAt`, and share tracking decisions.
 
+## Changed
+- When consumed as a SwiftPM dependency checkout, the package now uses the
+  DNM binary `libzcashlc` target instead of local FFI path discovery.
+
 # 2.5.1 - 2026-05-14
 
 ## Fixed
