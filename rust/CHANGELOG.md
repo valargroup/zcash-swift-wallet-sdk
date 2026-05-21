@@ -13,11 +13,14 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact-height PIR endpoint policy shared by `zcash_voting`.
 - `zcashlc_voting_share_submission_random_bytes_required`,
   `zcashlc_voting_plan_share_submissions`,
+  `zcashlc_voting_initial_share_delivery_random_bytes_required`,
+  `zcashlc_voting_next_initial_share_targets`,
   `zcashlc_voting_resubmission_server_order_random_bytes_required`,
   `zcashlc_voting_resubmission_server_order`,
   `zcashlc_voting_next_tracking_delay_seconds`, and
-  `zcashlc_voting_summarize_share_tracking` for wallet share submission,
-  resubmission, and tracking policy shared by `zcash_voting`.
+  `zcashlc_voting_summarize_share_tracking`, and
+  `zcashlc_voting_plan_share_recovery_actions` for wallet share submission,
+  delivery backfill, resubmission, and tracking policy shared by `zcash_voting`.
 
 ### Changed
 - Bumped `zcash_voting` to `0.9.1` for the pre-launch voting SQLite schema

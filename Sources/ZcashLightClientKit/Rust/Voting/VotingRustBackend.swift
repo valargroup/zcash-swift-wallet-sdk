@@ -1581,6 +1581,111 @@ extension VotingRustBackend {
         }
     }
 
+    /// Return the random byte count needed to backfill initial helper delivery targets.
+    public static func initialShareDeliveryRandomBytesRequired(
+        plan: VotingShareSubmissionPlan,
+        availableServerURLs: [String],
+        acceptedServerURLs: [String],
+        triedServerURLs: [String]
+    ) throws -> Int {
+        let plannedBytes = [UInt8](try JSONEncoder().encode(plan.targetServers))
+        let availableBytes = [UInt8](try JSONEncoder().encode(availableServerURLs))
+        let acceptedBytes = [UInt8](try JSONEncoder().encode(acceptedServerURLs))
+        let triedBytes = [UInt8](try JSONEncoder().encode(triedServerURLs))
+
+        let required: UInt64 = try plannedBytes.withUnsafeBufferPointer { plannedBuf in
+            try availableBytes.withUnsafeBufferPointer { availableBuf in
+                try acceptedBytes.withUnsafeBufferPointer { acceptedBuf in
+                    try triedBytes.withUnsafeBufferPointer { triedBuf in
+                        try staticJSONFFI(
+                            fallback: "`initial_share_delivery_random_bytes_required` failed"
+                        ) {
+                            zcashlc_voting_initial_share_delivery_random_bytes_required(
+                                plannedBuf.baseAddress,
+                                UInt(plannedBuf.count),
+                                availableBuf.baseAddress,
+                                UInt(availableBuf.count),
+                                acceptedBuf.baseAddress,
+                                UInt(acceptedBuf.count),
+                                triedBuf.baseAddress,
+                                UInt(triedBuf.count)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        guard required <= UInt64(Int.max) else {
+            throw VotingRustBackendError.invalidData("required random byte count is too large")
+        }
+        return Int(required)
+    }
+
+    /// Return the next helper targets for initial share delivery.
+    ///
+    /// This method preserves the shared plan's target count, tries planned
+    /// targets first, and draws fallback entropy from Apple's CSPRNG.
+    public static func nextInitialShareTargets(
+        plan: VotingShareSubmissionPlan,
+        availableServerURLs: [String],
+        acceptedServerURLs: [String],
+        triedServerURLs: [String]
+    ) throws -> [String] {
+        let required = try initialShareDeliveryRandomBytesRequired(
+            plan: plan,
+            availableServerURLs: availableServerURLs,
+            acceptedServerURLs: acceptedServerURLs,
+            triedServerURLs: triedServerURLs
+        )
+        return try nextInitialShareTargetsFromEntropy(
+            plan: plan,
+            availableServerURLs: availableServerURLs,
+            acceptedServerURLs: acceptedServerURLs,
+            triedServerURLs: triedServerURLs,
+            serverRandomBytes: secureRandomBytes(count: required)
+        )
+    }
+
+    /// Return the next helper targets for initial share delivery from caller-provided entropy.
+    public static func nextInitialShareTargetsFromEntropy(
+        plan: VotingShareSubmissionPlan,
+        availableServerURLs: [String],
+        acceptedServerURLs: [String],
+        triedServerURLs: [String],
+        serverRandomBytes: [UInt8]
+    ) throws -> [String] {
+        let plannedBytes = [UInt8](try JSONEncoder().encode(plan.targetServers))
+        let availableBytes = [UInt8](try JSONEncoder().encode(availableServerURLs))
+        let acceptedBytes = [UInt8](try JSONEncoder().encode(acceptedServerURLs))
+        let triedBytes = [UInt8](try JSONEncoder().encode(triedServerURLs))
+
+        return try plannedBytes.withUnsafeBufferPointer { plannedBuf in
+            try availableBytes.withUnsafeBufferPointer { availableBuf in
+                try acceptedBytes.withUnsafeBufferPointer { acceptedBuf in
+                    try triedBytes.withUnsafeBufferPointer { triedBuf in
+                        try serverRandomBytes.withUnsafeBufferPointer { randomBuf in
+                            try staticJSONFFI(fallback: "`next_initial_share_targets` failed") {
+                                zcashlc_voting_next_initial_share_targets(
+                                    plan.targetCount,
+                                    plannedBuf.baseAddress,
+                                    UInt(plannedBuf.count),
+                                    availableBuf.baseAddress,
+                                    UInt(availableBuf.count),
+                                    acceptedBuf.baseAddress,
+                                    UInt(acceptedBuf.count),
+                                    triedBuf.baseAddress,
+                                    UInt(triedBuf.count),
+                                    randomBuf.baseAddress,
+                                    UInt(randomBuf.count)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Return the random byte count needed to order helpers for resubmission.
     public static func resubmissionServerOrderRandomBytesRequired(
         configuredServerURLs: [String],
@@ -1686,6 +1791,25 @@ extension VotingRustBackend {
                     nowSeconds,
                     voteEndTimeSeconds ?? 0,
                     voteEndTimeSeconds == nil ? 0 : 1
+                )
+            }
+        }
+    }
+
+    /// Plan share recovery status checks, resubmissions, and next polling delay.
+    public static func planShareRecoveryActions(
+        shares: [VotingShareDelegation],
+        nowSeconds: UInt64,
+        voteEndTimeSeconds: UInt64
+    ) throws -> VotingShareRecoveryActionPlan {
+        let sharesBytes = [UInt8](try JSONEncoder().encode(shares))
+        return try sharesBytes.withUnsafeBufferPointer { sharesBuf in
+            try staticJSONFFI(fallback: "`plan_share_recovery_actions` failed") {
+                zcashlc_voting_plan_share_recovery_actions(
+                    sharesBuf.baseAddress,
+                    UInt(sharesBuf.count),
+                    nowSeconds,
+                    voteEndTimeSeconds
                 )
             }
         }

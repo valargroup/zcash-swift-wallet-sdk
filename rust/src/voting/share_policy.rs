@@ -143,6 +143,83 @@ pub unsafe extern "C" fn zcashlc_voting_plan_share_submissions(
     unwrap_exc_or_null(res)
 }
 
+/// Return random bytes required to backfill initial helper delivery targets.
+///
+/// Returns a JSON-encoded unsigned integer, or null on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_initial_share_delivery_random_bytes_required(
+    planned_target_servers_json: *const u8,
+    planned_target_servers_json_len: usize,
+    available_server_urls_json: *const u8,
+    available_server_urls_json_len: usize,
+    accepted_server_urls_json: *const u8,
+    accepted_server_urls_json_len: usize,
+    tried_server_urls_json: *const u8,
+    tried_server_urls_json_len: usize,
+) -> *mut crate::ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let planned = unsafe {
+            json_vec_from_ptr(planned_target_servers_json, planned_target_servers_json_len)
+        }?;
+        let available = unsafe {
+            json_vec_from_ptr(available_server_urls_json, available_server_urls_json_len)
+        }?;
+        let accepted =
+            unsafe { json_vec_from_ptr(accepted_server_urls_json, accepted_server_urls_json_len) }?;
+        let tried =
+            unsafe { json_vec_from_ptr(tried_server_urls_json, tried_server_urls_json_len) }?;
+        let required = voting::share_policy::initial_share_delivery_random_bytes_required(
+            &planned, &available, &accepted, &tried,
+        );
+        json_to_boxed_slice(&usize_to_u64(required)?)
+    });
+    unwrap_exc_or_null(res)
+}
+
+/// Return the next initial helper targets while preserving the planned target count.
+///
+/// Returns JSON-encoded `Vec<String>`, or null on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_next_initial_share_targets(
+    target_count: u64,
+    planned_target_servers_json: *const u8,
+    planned_target_servers_json_len: usize,
+    available_server_urls_json: *const u8,
+    available_server_urls_json_len: usize,
+    accepted_server_urls_json: *const u8,
+    accepted_server_urls_json_len: usize,
+    tried_server_urls_json: *const u8,
+    tried_server_urls_json_len: usize,
+    server_random_bytes: *const u8,
+    server_random_bytes_len: usize,
+) -> *mut crate::ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let planned = unsafe {
+            json_vec_from_ptr(planned_target_servers_json, planned_target_servers_json_len)
+        }?;
+        let available = unsafe {
+            json_vec_from_ptr(available_server_urls_json, available_server_urls_json_len)
+        }?;
+        let accepted =
+            unsafe { json_vec_from_ptr(accepted_server_urls_json, accepted_server_urls_json_len) }?;
+        let tried =
+            unsafe { json_vec_from_ptr(tried_server_urls_json, tried_server_urls_json_len) }?;
+        let server_random_bytes =
+            unsafe { bytes_from_ptr(server_random_bytes, server_random_bytes_len) }?;
+        let targets = voting::share_policy::next_initial_share_targets(
+            target_count,
+            &planned,
+            &available,
+            &accepted,
+            &tried,
+            server_random_bytes,
+        )
+        .map_err(|e| anyhow!("next_initial_share_targets failed: {}", e))?;
+        json_to_boxed_slice(&targets)
+    });
+    unwrap_exc_or_null(res)
+}
+
 /// Return random bytes required for a resubmission helper order.
 ///
 /// Returns a JSON-encoded unsigned integer, or null on error.
@@ -240,6 +317,29 @@ pub unsafe extern "C" fn zcashlc_voting_summarize_share_tracking(
             voting::share_policy::ShareTimingPolicy::default(),
         );
         json_to_boxed_slice(&summary)
+    });
+    unwrap_exc_or_null(res)
+}
+
+/// Plan share recovery status checks, resubmissions, and next polling delay.
+///
+/// Returns JSON-encoded `ShareRecoveryActionPlan`, or null on error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zcashlc_voting_plan_share_recovery_actions(
+    shares_json: *const u8,
+    shares_json_len: usize,
+    now_seconds: u64,
+    vote_end_time_seconds: u64,
+) -> *mut crate::ffi::BoxedSlice {
+    let res = catch_panic(|| {
+        let shares = unsafe { share_records_from_ptr(shares_json, shares_json_len) }?;
+        let plan = voting::share_policy::plan_share_recovery_actions(
+            &shares,
+            now_seconds,
+            vote_end_time_seconds,
+            voting::share_policy::ShareTimingPolicy::default(),
+        );
+        json_to_boxed_slice(&plan)
     });
     unwrap_exc_or_null(res)
 }
@@ -352,6 +452,59 @@ mod tests {
     }
 
     #[test]
+    fn initial_delivery_policy_backfills_to_target_count() {
+        let planned = json_bytes(&vec![
+            "https://helper-a.example",
+            "https://helper-b.example",
+            "https://helper-c.example",
+        ]);
+        let available = json_bytes(&vec![
+            "https://helper-b.example",
+            "https://helper-c.example",
+            "https://helper-d.example",
+        ]);
+        let empty = json_bytes(&Vec::<String>::new());
+
+        let required: u64 = decode_boxed_json(unsafe {
+            zcashlc_voting_initial_share_delivery_random_bytes_required(
+                planned.as_ptr(),
+                planned.len(),
+                available.as_ptr(),
+                available.len(),
+                empty.as_ptr(),
+                empty.len(),
+                empty.as_ptr(),
+                empty.len(),
+            )
+        });
+        assert_eq!(required, 0);
+
+        let targets: Vec<String> = decode_boxed_json(unsafe {
+            zcashlc_voting_next_initial_share_targets(
+                3,
+                planned.as_ptr(),
+                planned.len(),
+                available.as_ptr(),
+                available.len(),
+                empty.as_ptr(),
+                empty.len(),
+                empty.as_ptr(),
+                empty.len(),
+                std::ptr::null(),
+                0,
+            )
+        });
+        assert_eq!(
+            targets,
+            vec![
+                "https://helper-b.example".to_string(),
+                "https://helper-c.example".to_string(),
+                "https://helper-d.example".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn resubmission_order_uses_untried_helpers_first() {
         let configured = json_bytes(&vec![
             "https://helper-a.example",
@@ -407,5 +560,26 @@ mod tests {
         assert_eq!(summary.ready, 1);
         assert_eq!(summary.waiting, 0);
         assert_eq!(summary.overdue, 0);
+    }
+
+    #[test]
+    fn recovery_action_policy_returns_keys_and_next_delay() {
+        let mut ready = share_record(0, 100, false);
+        ready.share_index = 7;
+        let mut confirmed = share_record(0, 100, true);
+        confirmed.share_index = 8;
+        let shares = json_bytes(&vec![ready, confirmed]);
+
+        let plan: voting::share_policy::ShareRecoveryActionPlan = decode_boxed_json(unsafe {
+            zcashlc_voting_plan_share_recovery_actions(shares.as_ptr(), shares.len(), 130, 200)
+        });
+
+        assert_eq!(plan.ready_for_status_check.len(), 1);
+        assert_eq!(plan.ready_for_status_check[0].share_index, 7);
+        assert_eq!(plan.overdue_for_resubmission.len(), 1);
+        assert_eq!(plan.overdue_for_resubmission[0].share_index, 7);
+        assert_eq!(plan.next_delay_seconds, Some(15));
+        assert_eq!(plan.summary.confirmed, 1);
+        assert_eq!(plan.summary.overdue, 1);
     }
 }

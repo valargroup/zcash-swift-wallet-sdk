@@ -345,6 +345,55 @@ public struct VotingShareTrackingSummary: Codable, Equatable, Sendable {
     }
 }
 
+/// Stable key for a delegated share that needs wallet IO.
+public struct VotingShareDelegationKey: Codable, Equatable, Sendable {
+    public let roundId: String
+    public let bundleIndex: UInt32
+    public let proposalId: UInt32
+    public let shareIndex: UInt32
+
+    enum CodingKeys: String, CodingKey {
+        case roundId = "round_id"
+        case bundleIndex = "bundle_index"
+        case proposalId = "proposal_id"
+        case shareIndex = "share_index"
+    }
+
+    public init(roundId: String, bundleIndex: UInt32, proposalId: UInt32, shareIndex: UInt32) {
+        self.roundId = roundId
+        self.bundleIndex = bundleIndex
+        self.proposalId = proposalId
+        self.shareIndex = shareIndex
+    }
+}
+
+/// Recovery actions planned with the shared share tracking policy.
+public struct VotingShareRecoveryActionPlan: Codable, Equatable, Sendable {
+    public let readyForStatusCheck: [VotingShareDelegationKey]
+    public let overdueForResubmission: [VotingShareDelegationKey]
+    public let nextDelaySeconds: UInt64?
+    public let summary: VotingShareTrackingSummary
+
+    enum CodingKeys: String, CodingKey {
+        case readyForStatusCheck = "ready_for_status_check"
+        case overdueForResubmission = "overdue_for_resubmission"
+        case nextDelaySeconds = "next_delay_seconds"
+        case summary
+    }
+
+    public init(
+        readyForStatusCheck: [VotingShareDelegationKey],
+        overdueForResubmission: [VotingShareDelegationKey],
+        nextDelaySeconds: UInt64?,
+        summary: VotingShareTrackingSummary
+    ) {
+        self.readyForStatusCheck = readyForStatusCheck
+        self.overdueForResubmission = overdueForResubmission
+        self.nextDelaySeconds = nextDelaySeconds
+        self.summary = summary
+    }
+}
+
 // MARK: - Delegation Proof Result (JSON)
 
 /// Result of building and proving a delegation.

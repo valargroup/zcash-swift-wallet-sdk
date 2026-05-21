@@ -908,6 +908,39 @@ final class VotingRustBackendTests: XCTestCase {
         XCTAssertTrue(servers.contains(plans[0].targetServers[0]))
     }
 
+    func test_nextInitialShareTargetsFromEntropy_backfillsToPlannedTargetCount() throws {
+        let plan = VotingShareSubmissionPlan(
+            submitAt: 100,
+            targetCount: 3,
+            targetServers: [
+                "https://helper-a.example",
+                "https://helper-b.example",
+                "https://helper-c.example"
+            ]
+        )
+
+        let targets = try VotingRustBackend.nextInitialShareTargetsFromEntropy(
+            plan: plan,
+            availableServerURLs: [
+                "https://helper-b.example",
+                "https://helper-c.example",
+                "https://helper-d.example"
+            ],
+            acceptedServerURLs: [],
+            triedServerURLs: [],
+            serverRandomBytes: []
+        )
+
+        XCTAssertEqual(
+            targets,
+            [
+                "https://helper-b.example",
+                "https://helper-c.example",
+                "https://helper-d.example"
+            ]
+        )
+    }
+
     func test_resubmissionServerOrderFromEntropy_prefersUntriedHelpers() throws {
         let order = try VotingRustBackend.resubmissionServerOrderFromEntropy(
             configuredServerURLs: [
@@ -950,6 +983,25 @@ final class VotingRustBackendTests: XCTestCase {
         XCTAssertEqual(summary.waiting, 0)
         XCTAssertEqual(summary.ready, 1)
         XCTAssertEqual(summary.overdue, 0)
+    }
+
+    func test_planShareRecoveryActions_usesSharedPolicy() throws {
+        let plan = try VotingRustBackend.planShareRecoveryActions(
+            shares: [
+                makeShareDelegation(submitAt: 0, createdAt: 100, confirmed: false),
+                makeShareDelegation(submitAt: 0, createdAt: 100, confirmed: true)
+            ],
+            nowSeconds: 130,
+            voteEndTimeSeconds: 200
+        )
+
+        XCTAssertEqual(plan.readyForStatusCheck.count, 1)
+        XCTAssertEqual(plan.readyForStatusCheck[0].shareIndex, roundTripShareIndex0)
+        XCTAssertEqual(plan.overdueForResubmission.count, 1)
+        XCTAssertEqual(plan.overdueForResubmission[0].shareIndex, roundTripShareIndex0)
+        XCTAssertEqual(plan.nextDelaySeconds, 15)
+        XCTAssertEqual(plan.summary.confirmed, 1)
+        XCTAssertEqual(plan.summary.overdue, 1)
     }
 
     // MARK: - Delegation workflow
