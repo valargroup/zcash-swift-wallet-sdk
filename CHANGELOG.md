@@ -6,6 +6,10 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 # Unreleased
 
+## Added
+- Added `VotingRustBackend` share workflow planner methods for crate-owned
+  share mode, per-share `submitAt`, and share tracking decisions.
+
 # 2.5.1 - 2026-05-14
 
 ## Fixed

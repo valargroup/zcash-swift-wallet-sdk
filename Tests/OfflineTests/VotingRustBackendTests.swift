@@ -97,6 +97,42 @@ final class VotingRustBackendTests: XCTestCase {
         }
     }
 
+    // MARK: - Share workflow planning
+
+    func test_shareWorkflowPlanner_returnsModeSubmitTimesAndTrackingPlan() throws {
+        let backend = VotingRustBackend()
+        let mode = try backend.planShareMode(now: 1_000, ceremonyStart: 0, voteEnd: 2_000)
+
+        XCTAssertFalse(mode.singleShare)
+        XCTAssertEqual(mode.lastMomentBufferSeconds, 800)
+        XCTAssertEqual(mode.submitAtDelaySeconds, 200)
+
+        let submitTimes = try backend.planShareSubmitTimes(
+            shareCount: 2,
+            now: 1_000,
+            voteEnd: 2_000,
+            mode: mode
+        )
+
+        XCTAssertEqual(submitTimes.count, 2)
+        XCTAssertTrue(submitTimes.allSatisfy { (1_000..<1_200).contains($0) })
+
+        let pendingShare = makeShareDelegation(shareIndex: 2, submitAt: 1_000, confirmed: false)
+        let confirmedShare = makeShareDelegation(shareIndex: 3, submitAt: 0, confirmed: true)
+        let trackingPlan = try backend.planShareTracking(
+            delegations: [pendingShare, confirmedShare],
+            now: 1_100,
+            voteEnd: 1_400
+        )
+        let expectedKey = VotingShareWorkflowKey(bundleIndex: 0, proposalId: 1, shareIndex: 2)
+
+        XCTAssertEqual(trackingPlan.summary.total, 2)
+        XCTAssertEqual(trackingPlan.summary.confirmed, 1)
+        XCTAssertEqual(trackingPlan.readyShareKeys, [expectedKey])
+        XCTAssertEqual(trackingPlan.overdueShareKeys, [expectedKey])
+        XCTAssertEqual(trackingPlan.nextDelaySeconds, 15)
+    }
+
     // MARK: - Database lifecycle
 
     func test_open_succeedsAndCreatesFile() throws {
@@ -1387,6 +1423,24 @@ final class VotingRustBackendTests: XCTestCase {
         let path = "\(NSTemporaryDirectory())VotingRustBackendTests-\(unique).sqlite"
         dbPath = path
         return path
+    }
+
+    private func makeShareDelegation(
+        shareIndex: UInt32,
+        submitAt: UInt64,
+        confirmed: Bool
+    ) -> VotingShareDelegation {
+        VotingShareDelegation(
+            roundId: "round",
+            bundleIndex: 0,
+            proposalId: 1,
+            shareIndex: shareIndex,
+            sentToURLs: ["https://helper.example"],
+            nullifier: String(repeating: "aa", count: votingShareNullifierByteCount),
+            confirmed: confirmed,
+            submitAt: submitAt,
+            createdAt: 900
+        )
     }
 
     private func makeReadyBackend(walletId: String = roundTripWalletId) throws -> VotingRustBackend {

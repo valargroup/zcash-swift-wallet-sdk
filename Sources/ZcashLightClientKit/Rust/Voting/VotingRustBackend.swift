@@ -1231,6 +1231,78 @@ extension VotingRustBackend {
 // MARK: - Share delegation tracking
 
 extension VotingRustBackend {
+    /// Plan whether this round should use delayed multi-share or immediate
+    /// single-share submission at `now`.
+    public func planShareMode(
+        now: UInt64,
+        ceremonyStart: UInt64,
+        voteEnd: UInt64
+    ) throws -> VotingShareModePlan {
+        guard let ptr = zcashlc_voting_plan_share_mode(now, ceremonyStart, voteEnd) else {
+            throw VotingRustBackendError.rustError(
+                Self.staticLastErrorMessage(fallback: "`plan_share_mode` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return try Self.staticDecodeJSON(from: ptr)
+    }
+
+    /// Plan per-share `submit_at` values using SDK-owned CSPRNG entropy.
+    public func planShareSubmitTimes(
+        shareCount: Int,
+        now: UInt64,
+        voteEnd: UInt64,
+        mode: VotingShareModePlan
+    ) throws -> [UInt64] {
+        guard shareCount >= 0 else {
+            throw VotingRustBackendError.invalidData("shareCount must be non-negative")
+        }
+
+        let modeJson = try JSONEncoder().encode(mode)
+        let modeBytes = [UInt8](modeJson)
+        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = modeBytes.withUnsafeBufferPointer { modeBuf in
+            zcashlc_voting_plan_share_submit_times(
+                UInt(shareCount),
+                now,
+                voteEnd,
+                modeBuf.baseAddress,
+                UInt(modeBuf.count)
+            )
+        }
+        guard let ptr else {
+            throw VotingRustBackendError.rustError(
+                Self.staticLastErrorMessage(fallback: "`plan_share_submit_times` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return try Self.staticDecodeJSON(from: ptr)
+    }
+
+    /// Plan the next wallet-side share tracking pass.
+    public func planShareTracking(
+        delegations: [VotingShareDelegation],
+        now: UInt64,
+        voteEnd: UInt64
+    ) throws -> VotingShareTrackingPlan {
+        let sharesJson = try JSONEncoder().encode(delegations)
+        let sharesBytes = [UInt8](sharesJson)
+        let ptr: UnsafeMutablePointer<FfiBoxedSlice>? = sharesBytes.withUnsafeBufferPointer { sharesBuf in
+            zcashlc_voting_plan_share_tracking(
+                sharesBuf.baseAddress,
+                UInt(sharesBuf.count),
+                now,
+                voteEnd
+            )
+        }
+        guard let ptr else {
+            throw VotingRustBackendError.rustError(
+                Self.staticLastErrorMessage(fallback: "`plan_share_tracking` failed")
+            )
+        }
+        defer { zcashlc_free_boxed_slice(ptr) }
+        return try Self.staticDecodeJSON(from: ptr)
+    }
+
     /// Record a share delegation after sending it to helper servers.
     // swiftlint:disable:next function_parameter_count
     public func recordShareDelegation(

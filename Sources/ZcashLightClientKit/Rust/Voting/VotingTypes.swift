@@ -203,6 +203,102 @@ public struct VotingShareDelegation: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Share Workflow Planning (JSON)
+
+/// Crate-owned share submission mode for a voting round at a point in time.
+public struct VotingShareModePlan: Codable, Equatable, Sendable {
+    public let singleShare: Bool
+    public let lastMomentBufferSeconds: UInt64?
+    public let submitAtDelaySeconds: UInt64?
+
+    public init(
+        singleShare: Bool,
+        lastMomentBufferSeconds: UInt64?,
+        submitAtDelaySeconds: UInt64?
+    ) {
+        self.singleShare = singleShare
+        self.lastMomentBufferSeconds = lastMomentBufferSeconds
+        self.submitAtDelaySeconds = submitAtDelaySeconds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case singleShare = "single_share"
+        case lastMomentBufferSeconds = "last_moment_buffer_seconds"
+        case submitAtDelaySeconds = "submit_at_delay_seconds"
+    }
+}
+
+/// Stable identity for a tracked share delegation.
+public struct VotingShareWorkflowKey: Codable, Equatable, Sendable {
+    public let bundleIndex: UInt32
+    public let proposalId: UInt32
+    public let shareIndex: UInt32
+
+    public init(bundleIndex: UInt32, proposalId: UInt32, shareIndex: UInt32) {
+        self.bundleIndex = bundleIndex
+        self.proposalId = proposalId
+        self.shareIndex = shareIndex
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case bundleIndex = "bundle_index"
+        case proposalId = "proposal_id"
+        case shareIndex = "share_index"
+    }
+}
+
+/// Counts shares by recovery status.
+public struct VotingShareTrackingSummary: Codable, Equatable, Sendable {
+    public let total: UInt64
+    public let confirmed: UInt64
+    public let waiting: UInt64
+    public let ready: UInt64
+    public let overdue: UInt64
+
+    public init(
+        total: UInt64,
+        confirmed: UInt64,
+        waiting: UInt64,
+        ready: UInt64,
+        overdue: UInt64
+    ) {
+        self.total = total
+        self.confirmed = confirmed
+        self.waiting = waiting
+        self.ready = ready
+        self.overdue = overdue
+    }
+}
+
+/// Crate-owned share tracking decision for the wallet polling loop.
+public struct VotingShareTrackingPlan: Codable, Equatable, Sendable {
+    public let summary: VotingShareTrackingSummary
+    /// Unconfirmed shares ready for status checks. This includes overdue shares.
+    public let readyShareKeys: [VotingShareWorkflowKey]
+    /// Unconfirmed shares that should be resubmitted if status checks fail.
+    public let overdueShareKeys: [VotingShareWorkflowKey]
+    public let nextDelaySeconds: UInt64?
+
+    public init(
+        summary: VotingShareTrackingSummary,
+        readyShareKeys: [VotingShareWorkflowKey],
+        overdueShareKeys: [VotingShareWorkflowKey],
+        nextDelaySeconds: UInt64?
+    ) {
+        self.summary = summary
+        self.readyShareKeys = readyShareKeys
+        self.overdueShareKeys = overdueShareKeys
+        self.nextDelaySeconds = nextDelaySeconds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case summary
+        case readyShareKeys = "ready_share_keys"
+        case overdueShareKeys = "overdue_share_keys"
+        case nextDelaySeconds = "next_delay_seconds"
+    }
+}
+
 // MARK: - Delegation Proof Result (JSON)
 
 /// Result of building and proving a delegation.

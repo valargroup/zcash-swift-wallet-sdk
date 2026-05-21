@@ -46,6 +46,24 @@ impl From<voting::ShareDelegationRecord> for JsonShareDelegationRecord {
     }
 }
 
+impl TryFrom<JsonShareDelegationRecord> for voting::ShareDelegationRecord {
+    type Error = anyhow::Error;
+
+    fn try_from(r: JsonShareDelegationRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            round_id: r.round_id,
+            bundle_index: r.bundle_index,
+            proposal_id: r.proposal_id,
+            share_index: r.share_index,
+            sent_to_urls: r.sent_to_urls,
+            nullifier: decode_share_nullifier_hex(&r.nullifier)?.to_vec(),
+            confirmed: r.confirmed,
+            submit_at: r.submit_at,
+            created_at: r.created_at,
+        })
+    }
+}
+
 fn bytes_to_hex(bytes: &[u8]) -> String {
     let mut hex = String::with_capacity(bytes.len() * 2);
     for b in bytes {

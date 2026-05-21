@@ -6,7 +6,13 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Added share workflow planner FFI for crate-owned share mode, `submit_at`, and
+  share tracking decisions.
+
 ### Changed
+- Pointed `zcash_voting` at the Valar share workflow planner demo branch for
+  crate-owned share timing policy.
 - Bumped `zcash_voting` to `0.8.1` for the pre-launch voting SQLite schema
   reset, crate-owned recovery store missing-row errors, required voting input
   validation, paginated vote commitment tree sync responses with per-block
