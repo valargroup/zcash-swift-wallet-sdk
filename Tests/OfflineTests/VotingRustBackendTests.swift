@@ -1004,6 +1004,87 @@ final class VotingRustBackendTests: XCTestCase {
         XCTAssertEqual(plan.summary.overdue, 1)
     }
 
+    func test_shareDeliveryWorkflow_recordsAcceptedShare() throws {
+        let key = VotingShareDelegationKey(
+            roundId: roundTripRoundId,
+            bundleIndex: roundTripBundleIndex,
+            proposalId: roundTripProposalId,
+            shareIndex: roundTripShareIndex0
+        )
+        let start = try VotingRustBackend.startShareDeliveryWorkflow(
+            shares: [
+                VotingShareDeliveryPlan(
+                    key: key,
+                    submitAt: roundTripFirstSubmitAt,
+                    targetCount: 1,
+                    targetServers: [roundTripHelperAURL]
+                )
+            ],
+            availableServerURLs: [roundTripHelperAURL]
+        )
+
+        XCTAssertEqual(start.actions.first?.kind, .postShare)
+        XCTAssertEqual(start.actions.first?.key, key)
+        XCTAssertEqual(start.actions.first?.serverURL, roundTripHelperAURL)
+
+        let state = try XCTUnwrap(start.deliveryState)
+        let applied = try VotingRustBackend.applyShareDeliveryWorkflowResults(
+            state: state,
+            results: [
+                VotingSharePostResult(
+                    key: key,
+                    serverURL: roundTripHelperAURL,
+                    accepted: true
+                )
+            ]
+        )
+
+        XCTAssertTrue(applied.actions.contains {
+            $0.kind == .recordShareDelegation
+                && $0.key == key
+                && $0.sentToURLs == [roundTripHelperAURL]
+        })
+        XCTAssertTrue(applied.actions.contains { $0.kind == .deliveryComplete })
+    }
+
+    func test_shareRecoveryWorkflow_startsOverdueResubmission() throws {
+        let share = makeShareDelegation(submitAt: 0, createdAt: 100, confirmed: false)
+        let key = VotingShareDelegationKey(
+            roundId: share.roundId,
+            bundleIndex: share.bundleIndex,
+            proposalId: share.proposalId,
+            shareIndex: share.shareIndex
+        )
+
+        let planned = try VotingRustBackend.planShareRecoveryWorkflow(
+            shares: [share],
+            nowSeconds: 130,
+            voteEndTimeSeconds: 200
+        )
+        XCTAssertEqual(planned.actions.first?.kind, .fetchShareStatus)
+        XCTAssertEqual(planned.actions.first?.key, key)
+        XCTAssertEqual(planned.actions.first?.serverURL, roundTripHelperAURL)
+
+        let applied = try VotingRustBackend.applyShareRecoveryStatusResults(
+            shares: [share],
+            statusResults: [
+                VotingShareStatusResult(
+                    key: key,
+                    serverURL: roundTripHelperAURL,
+                    confirmed: false
+                )
+            ],
+            nowSeconds: 130,
+            voteEndTimeSeconds: 200
+        )
+
+        XCTAssertTrue(applied.actions.contains {
+            $0.kind == .startResubmission
+                && $0.key == key
+                && $0.sentToURLs == [roundTripHelperAURL]
+        })
+    }
+
     // MARK: - Delegation workflow
 
     func test_setupBundles_returnsZero_forEmptyNotes() throws {

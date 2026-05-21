@@ -7,6 +7,8 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 # Unreleased
 
 ## Added
+- `VotingRustBackend` share workflow helpers for shared helper-share delivery,
+  recovery polling, and resubmission action planning using `zcash_voting`.
 - `VotingRustBackend` note bundling and PIR snapshot helpers backed by
   `zcash_voting 0.9.1`, so wallets can reuse shared bundle planning and
   exact-height PIR endpoint selection policy.

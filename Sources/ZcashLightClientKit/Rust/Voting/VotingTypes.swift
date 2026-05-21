@@ -394,6 +394,218 @@ public struct VotingShareRecoveryActionPlan: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Share Workflow (JSON)
+
+/// Planned share delivery item consumed by the shared share workflow.
+public struct VotingShareDeliveryPlan: Codable, Equatable, Sendable {
+    public let key: VotingShareDelegationKey
+    public let submitAt: UInt64
+    public let targetCount: UInt64
+    public let targetServers: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case submitAt = "submit_at"
+        case targetCount = "target_count"
+        case targetServers = "target_servers"
+    }
+
+    public init(
+        key: VotingShareDelegationKey,
+        submitAt: UInt64,
+        targetCount: UInt64,
+        targetServers: [String]
+    ) {
+        self.key = key
+        self.submitAt = submitAt
+        self.targetCount = targetCount
+        self.targetServers = targetServers
+    }
+}
+
+public struct VotingShareDeliveryShareState: Codable, Equatable, Sendable {
+    public let key: VotingShareDelegationKey
+    public let submitAt: UInt64
+    public let targetCount: UInt64
+    public let targetServers: [String]
+    public let acceptedServerURLs: [String]
+    public let triedServerURLs: [String]
+    public let recorded: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case submitAt = "submit_at"
+        case targetCount = "target_count"
+        case targetServers = "target_servers"
+        case acceptedServerURLs = "accepted_server_urls"
+        case triedServerURLs = "tried_server_urls"
+        case recorded
+    }
+}
+
+public struct VotingShareDeliveryState: Codable, Equatable, Sendable {
+    public let availableServerURLs: [String]
+    public let shares: [VotingShareDeliveryShareState]
+    public let nextShareIndex: Int
+    public let finished: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case availableServerURLs = "available_server_urls"
+        case shares
+        case nextShareIndex = "next_share_index"
+        case finished
+    }
+}
+
+public struct VotingShareResubmissionState: Codable, Equatable, Sendable {
+    public let key: VotingShareDelegationKey
+    public let serverOrder: [String]
+    public let nextServerIndex: Int
+    public let acceptedServerURL: String?
+    public let finished: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case serverOrder = "server_order"
+        case nextServerIndex = "next_server_index"
+        case acceptedServerURL = "accepted_server_url"
+        case finished
+    }
+}
+
+public struct VotingShareWorkflowDelegation: Codable, Equatable, Sendable {
+    public let roundId: String
+    public let bundleIndex: UInt32
+    public let proposalId: UInt32
+    public let shareIndex: UInt32
+    public let sentToURLs: [String]
+    public let nullifier: [UInt8]
+    public let confirmed: Bool
+    public let submitAt: UInt64
+    public let createdAt: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case roundId = "round_id"
+        case bundleIndex = "bundle_index"
+        case proposalId = "proposal_id"
+        case shareIndex = "share_index"
+        case sentToURLs = "sent_to_urls"
+        case nullifier
+        case confirmed
+        case submitAt = "submit_at"
+        case createdAt = "created_at"
+    }
+
+    public init(
+        roundId: String,
+        bundleIndex: UInt32,
+        proposalId: UInt32,
+        shareIndex: UInt32,
+        sentToURLs: [String],
+        nullifier: [UInt8],
+        confirmed: Bool,
+        submitAt: UInt64,
+        createdAt: UInt64
+    ) {
+        self.roundId = roundId
+        self.bundleIndex = bundleIndex
+        self.proposalId = proposalId
+        self.shareIndex = shareIndex
+        self.sentToURLs = sentToURLs
+        self.nullifier = nullifier
+        self.confirmed = confirmed
+        self.submitAt = submitAt
+        self.createdAt = createdAt
+    }
+}
+
+public struct VotingSharePostResult: Codable, Equatable, Sendable {
+    public let key: VotingShareDelegationKey
+    public let serverURL: String
+    public let accepted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case serverURL = "server_url"
+        case accepted
+    }
+
+    public init(key: VotingShareDelegationKey, serverURL: String, accepted: Bool) {
+        self.key = key
+        self.serverURL = serverURL
+        self.accepted = accepted
+    }
+}
+
+public struct VotingShareStatusResult: Codable, Equatable, Sendable {
+    public let key: VotingShareDelegationKey
+    public let serverURL: String
+    public let confirmed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case serverURL = "server_url"
+        case confirmed
+    }
+
+    public init(key: VotingShareDelegationKey, serverURL: String, confirmed: Bool) {
+        self.key = key
+        self.serverURL = serverURL
+        self.confirmed = confirmed
+    }
+}
+
+public struct VotingShareWorkflowAction: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case postShare = "post_share"
+        case fetchShareStatus = "fetch_share_status"
+        case recordShareDelegation = "record_share_delegation"
+        case markShareConfirmed = "mark_share_confirmed"
+        case addSentServers = "add_sent_servers"
+        case startResubmission = "start_resubmission"
+        case scheduleWakeup = "schedule_wakeup"
+        case deliveryComplete = "delivery_complete"
+        case deliveryFailed = "delivery_failed"
+        case resubmissionComplete = "resubmission_complete"
+    }
+
+    public let kind: Kind
+    public let key: VotingShareDelegationKey?
+    public let serverURL: String?
+    public let submitAt: UInt64?
+    public let resubmission: Bool?
+    public let roundId: String?
+    public let nullifier: [UInt8]?
+    public let sentToURLs: [String]?
+    public let serverURLs: [String]?
+    public let delaySeconds: UInt64?
+    public let reason: String?
+    public let acceptedServerURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, key, resubmission, nullifier, reason
+        case serverURL = "server_url"
+        case submitAt = "submit_at"
+        case roundId = "round_id"
+        case sentToURLs = "sent_to_urls"
+        case serverURLs = "server_urls"
+        case delaySeconds = "delay_seconds"
+        case acceptedServerURL = "accepted_server_url"
+    }
+}
+
+public struct VotingShareWorkflowResponse: Codable, Equatable, Sendable {
+    public let deliveryState: VotingShareDeliveryState?
+    public let resubmissionState: VotingShareResubmissionState?
+    public let actions: [VotingShareWorkflowAction]
+
+    enum CodingKeys: String, CodingKey {
+        case deliveryState = "delivery_state"
+        case resubmissionState = "resubmission_state"
+        case actions
+    }
+}
+
 // MARK: - Delegation Proof Result (JSON)
 
 /// Result of building and proving a delegation.

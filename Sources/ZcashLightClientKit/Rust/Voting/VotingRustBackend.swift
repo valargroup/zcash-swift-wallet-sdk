@@ -1816,6 +1816,96 @@ extension VotingRustBackend {
     }
 }
 
+// MARK: - Share workflow
+
+extension VotingRustBackend {
+    /// Start shared initial helper-share delivery planning.
+    public static func startShareDeliveryWorkflow(
+        shares: [VotingShareDeliveryPlan],
+        availableServerURLs: [String]
+    ) throws -> VotingShareWorkflowResponse {
+        try applyShareWorkflow(
+            StartShareDeliveryWorkflowRequest(
+                shares: shares,
+                availableServerURLs: availableServerURLs
+            )
+        )
+    }
+
+    /// Apply helper POST results and return the next shared delivery actions.
+    public static func applyShareDeliveryWorkflowResults(
+        state: VotingShareDeliveryState,
+        results: [VotingSharePostResult]
+    ) throws -> VotingShareWorkflowResponse {
+        try applyShareWorkflow(
+            ApplyShareDeliveryResultsWorkflowRequest(
+                state: state,
+                results: results
+            )
+        )
+    }
+
+    /// Start shared resubmission planning for one overdue share.
+    public static func startShareResubmissionWorkflow(
+        key: VotingShareDelegationKey,
+        configuredServerURLs: [String],
+        sentToURLs: [String]
+    ) throws -> VotingShareWorkflowResponse {
+        try applyShareWorkflow(
+            StartShareResubmissionWorkflowRequest(
+                key: key,
+                configuredServerURLs: configuredServerURLs,
+                sentToURLs: sentToURLs
+            )
+        )
+    }
+
+    /// Apply one resubmission POST result and return the next shared action.
+    public static func applyShareResubmissionWorkflowResult(
+        state: VotingShareResubmissionState,
+        result: VotingSharePostResult
+    ) throws -> VotingShareWorkflowResponse {
+        try applyShareWorkflow(
+            ApplyShareResubmissionResultWorkflowRequest(
+                state: state,
+                result: result
+            )
+        )
+    }
+
+    /// Plan helper-status fetches or the next wakeup using the shared workflow.
+    public static func planShareRecoveryWorkflow(
+        shares: [VotingShareDelegation],
+        nowSeconds: UInt64,
+        voteEndTimeSeconds: UInt64
+    ) throws -> VotingShareWorkflowResponse {
+        try applyShareWorkflow(
+            PlanShareRecoveryPollWorkflowRequest(
+                shares: workflowDelegations(from: shares),
+                nowSeconds: nowSeconds,
+                voteEndTimeSeconds: voteEndTimeSeconds
+            )
+        )
+    }
+
+    /// Apply helper-status results and return shared confirmation/resubmission actions.
+    public static func applyShareRecoveryStatusResults(
+        shares: [VotingShareDelegation],
+        statusResults: [VotingShareStatusResult],
+        nowSeconds: UInt64,
+        voteEndTimeSeconds: UInt64
+    ) throws -> VotingShareWorkflowResponse {
+        try applyShareWorkflow(
+            ApplyShareRecoveryStatusResultsWorkflowRequest(
+                shares: workflowDelegations(from: shares),
+                statusResults: statusResults,
+                nowSeconds: nowSeconds,
+                voteEndTimeSeconds: voteEndTimeSeconds
+            )
+        )
+    }
+}
+
 // MARK: - Delegation workflow
 
 extension VotingRustBackend {
@@ -2199,6 +2289,72 @@ extension VotingRustBackend {
     }
 }
 
+// MARK: - Share workflow request encoding
+
+private struct StartShareDeliveryWorkflowRequest: Encodable {
+    let kind = "start_delivery"
+    let shares: [VotingShareDeliveryPlan]
+    let availableServerURLs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case kind, shares
+        case availableServerURLs = "available_server_urls"
+    }
+}
+
+private struct ApplyShareDeliveryResultsWorkflowRequest: Encodable {
+    let kind = "apply_delivery_results"
+    let state: VotingShareDeliveryState
+    let results: [VotingSharePostResult]
+}
+
+private struct StartShareResubmissionWorkflowRequest: Encodable {
+    let kind = "start_resubmission"
+    let key: VotingShareDelegationKey
+    let configuredServerURLs: [String]
+    let sentToURLs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case kind, key
+        case configuredServerURLs = "configured_server_urls"
+        case sentToURLs = "sent_to_urls"
+    }
+}
+
+private struct ApplyShareResubmissionResultWorkflowRequest: Encodable {
+    let kind = "apply_resubmission_result"
+    let state: VotingShareResubmissionState
+    let result: VotingSharePostResult
+}
+
+private struct PlanShareRecoveryPollWorkflowRequest: Encodable {
+    let kind = "plan_recovery_poll"
+    let shares: [VotingShareWorkflowDelegation]
+    let nowSeconds: UInt64
+    let voteEndTimeSeconds: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case kind, shares
+        case nowSeconds = "now_seconds"
+        case voteEndTimeSeconds = "vote_end_time_seconds"
+    }
+}
+
+private struct ApplyShareRecoveryStatusResultsWorkflowRequest: Encodable {
+    let kind = "apply_recovery_status_results"
+    let shares: [VotingShareWorkflowDelegation]
+    let statusResults: [VotingShareStatusResult]
+    let nowSeconds: UInt64
+    let voteEndTimeSeconds: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case kind, shares
+        case statusResults = "status_results"
+        case nowSeconds = "now_seconds"
+        case voteEndTimeSeconds = "vote_end_time_seconds"
+    }
+}
+
 // MARK: - Private helpers
 
 private extension VotingRustBackend {
@@ -2331,6 +2487,89 @@ private extension VotingRustBackend {
         }
         defer { zcashlc_free_boxed_slice(ptr) }
         return try staticDecodeJSON(from: ptr)
+    }
+
+    static func shareWorkflowRandomBytesRequired<Request: Encodable>(
+        _ request: Request
+    ) throws -> Int {
+        let requestBytes = [UInt8](try JSONEncoder().encode(request))
+        let required: UInt64 = try requestBytes.withUnsafeBufferPointer { requestBuf in
+            try staticJSONFFI(fallback: "`share_workflow_random_bytes_required` failed") {
+                zcashlc_voting_share_workflow_random_bytes_required(
+                    requestBuf.baseAddress,
+                    UInt(requestBuf.count)
+                )
+            }
+        }
+        guard required <= UInt64(Int.max) else {
+            throw VotingRustBackendError.invalidData("required random byte count is too large")
+        }
+        return Int(required)
+    }
+
+    static func applyShareWorkflow<Request: Encodable>(
+        _ request: Request
+    ) throws -> VotingShareWorkflowResponse {
+        let required = try shareWorkflowRandomBytesRequired(request)
+        return try applyShareWorkflow(
+            request,
+            randomBytes: secureRandomBytes(count: required)
+        )
+    }
+
+    static func applyShareWorkflow<Request: Encodable>(
+        _ request: Request,
+        randomBytes: [UInt8]
+    ) throws -> VotingShareWorkflowResponse {
+        let requestBytes = [UInt8](try JSONEncoder().encode(request))
+        return try requestBytes.withUnsafeBufferPointer { requestBuf in
+            try randomBytes.withUnsafeBufferPointer { randomBuf in
+                try staticJSONFFI(fallback: "`apply_share_workflow` failed") {
+                    zcashlc_voting_apply_share_workflow(
+                        requestBuf.baseAddress,
+                        UInt(requestBuf.count),
+                        randomBuf.baseAddress,
+                        UInt(randomBuf.count)
+                    )
+                }
+            }
+        }
+    }
+
+    static func workflowDelegations(
+        from shares: [VotingShareDelegation]
+    ) throws -> [VotingShareWorkflowDelegation] {
+        try shares.map { share in
+            VotingShareWorkflowDelegation(
+                roundId: share.roundId,
+                bundleIndex: share.bundleIndex,
+                proposalId: share.proposalId,
+                shareIndex: share.shareIndex,
+                sentToURLs: share.sentToURLs,
+                nullifier: try decodeHexBytes(share.nullifier, fieldName: "nullifier"),
+                confirmed: share.confirmed,
+                submitAt: share.submitAt,
+                createdAt: share.createdAt
+            )
+        }
+    }
+
+    static func decodeHexBytes(_ value: String, fieldName: String) throws -> [UInt8] {
+        guard value.count % 2 == 0, isHexString(value) else {
+            throw VotingRustBackendError.invalidData("\(fieldName) must be an even-length hex string")
+        }
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(value.count / 2)
+        var index = value.startIndex
+        while index < value.endIndex {
+            let next = value.index(index, offsetBy: 2)
+            guard let byte = UInt8(value[index..<next], radix: 16) else {
+                throw VotingRustBackendError.invalidData("\(fieldName) contains invalid hex")
+            }
+            bytes.append(byte)
+            index = next
+        }
+        return bytes
     }
 
     /// Decode Rust's persisted round phase without silently aliasing unknown values.

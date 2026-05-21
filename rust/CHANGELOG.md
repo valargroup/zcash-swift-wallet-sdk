@@ -7,6 +7,10 @@ and this library adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Added
+- `zcashlc_voting_share_workflow_random_bytes_required` and
+  `zcashlc_voting_apply_share_workflow` for coarse helper-share delivery,
+  recovery polling, and resubmission workflow actions shared by
+  `zcash_voting`.
 - `zcashlc_voting_plan_note_bundles`,
   `zcashlc_voting_classify_pir_snapshot_height`, and
   `zcashlc_voting_select_pir_snapshot_endpoint` for wallet note bundling and

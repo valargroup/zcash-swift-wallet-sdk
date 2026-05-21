@@ -17,6 +17,7 @@ pub mod recovery;
 pub mod rounds;
 pub mod share_policy;
 pub mod share_tracking;
+pub mod share_workflow;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 pub mod tree;
